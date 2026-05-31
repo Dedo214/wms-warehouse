@@ -336,6 +336,49 @@ def item_barcode_label(iid):
     return send_file(buf, mimetype="application/pdf",
                      download_name=f"{item.code}_label.pdf")
 
+@api.route("/items/bulk-labels", methods=["POST"])
+@jwt_required()
+def bulk_barcode_labels():
+    data = request.get_json() or {}
+    ids = data.get("item_ids", [])
+    if not ids: return err("قائمة معرفات الأصناف مطلوبة")
+    items = Item.query.filter(Item.id.in_(ids), Item.is_active==True).all()
+    if not items: return err("لا توجد أصناف صالحة")
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Image as RLImage, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    import tempfile
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=10*mm, leftMargin=10*mm,
+                            topMargin=10*mm, bottomMargin=10*mm)
+    styles = getSampleStyleSheet()
+    elems = []
+    for item in items:
+        code = item.barcode or item.code
+        png = os.path.join(tempfile.gettempdir(), f"bc_{item.id}.png")
+        try:
+            import barcode as bc_lib
+            from barcode.writer import ImageWriter
+            code128 = bc_lib.get_barcode_class("code128")
+            bc = code128(code, writer=ImageWriter())
+            with open(png, "wb") as f: bc.write(f)
+        except ImportError:
+            png = None
+        elems.append(Paragraph(f"<b>{item.name}</b>", styles["Normal"]))
+        elems.append(Paragraph(f"الكود: {code} | {item.unit}", styles["Normal"]))
+        if png and os.path.isfile(png):
+            elems.append(RLImage(png, width=80*mm, height=25*mm))
+        elems.append(Spacer(1, 5*mm))
+    doc.build(elems); buf.seek(0)
+    for item in items:
+        p = os.path.join(tempfile.gettempdir(), f"bc_{item.id}.png")
+        if os.path.isfile(p): os.remove(p)
+    return send_file(buf, mimetype="application/pdf",
+                     download_name=f"bulk_barcodes_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                     as_attachment=True)
+
 # ══════════════════════════════════════════════════════════════
 #  STOCK MOVEMENTS
 # ══════════════════════════════════════════════════════════════
@@ -1317,6 +1360,19 @@ def export_csv():
                 writer.writerow([it.name, it.code, v["total_qty"],
                                round(v["avg_cost"],2) if v["avg_cost"] else 0,
                                round(v["total_value"],2), v["layer_count"]])
+    elif rtype == "audit":
+        import csv as _csv
+        filters = {}
+        for k in ["user_id","action","resource","date_from","date_to","search"]:
+            v = request.args.get(k)
+            if v: filters[k] = v
+        result = AuditService.get_logs(1, 99999, filters)
+        writer.writerow(["#","التاريخ","المستخدم","الإجراء","العنصر","الوصف","IP","البيانات القديمة","البيانات الجديدة"])
+        for l in (l.to_dict() for l in result["items"]):
+            writer.writerow([l["id"],l["created_date"],l["user_name"],l["action"],
+                            f"{l['resource']}#{l['resource_id']}" if l['resource_id'] else l['resource'],
+                            l["description"] or "",l["ip_address"] or "",
+                            l["old_data"] or "",l["new_data"] or ""])
     else:
         return err("نوع تقرير غير معروف")
 
@@ -1630,6 +1686,31 @@ def export_pdf():
         grand_v = sum(v["total_value"] for v in [InventoryLayer.get_valuation(it.id) for it in Item.query.filter_by(is_active=True).all()] if v["total_qty"] > 0)
         elements.append(Spacer(1,0.3*cm))
         elements.append(Paragraph(f"Total Items: {len(data)} | Grand Total Value: {grand_v:,.2f} SAR", f_style))
+
+    elif rtype == "audit":
+        headers = ["#","Date","User","Action","Resource","Description","IP"]
+        data = []
+        filters = {}
+        for k in ["user_id","action","resource","date_from","date_to","search"]:
+            v = request.args.get(k)
+            if v: filters[k] = v
+        result = AuditService.get_logs(1, 5000, filters)
+        for l in result["items"]:
+            data.append([
+                str(l.id), (l.created_date or "")[:16],
+                (l.user_name or "")[:15], l.action,
+                f"{l.resource}#{l.resource_id}" if l.resource_id else (l.resource or ""),
+                (l.description or "")[:25], l.ip_address or "",
+            ])
+        col_w = [1*cm, 2.5*cm, 2.5*cm, 1.8*cm, 3*cm, 5*cm, 2.5*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"Audit Log Report — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+        elements.append(Spacer(1,0.3*cm))
+        elements.append(Paragraph(f"Total Logs: {len(data)}", f_style))
 
     else:
         return err("نوع تقرير غير معروف")

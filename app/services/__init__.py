@@ -1226,6 +1226,28 @@ class ReportService:
                         ws.cell(row=ri, column=col, value=val)
                     style_row(ri, len(headers), alt=ri%2==0); ri += 1
 
+        elif report_type == "audit":
+            from app.services import AuditService
+            ws.title = "سجل الأوديت"
+            ws.merge_cells("A1:I1")
+            ws["A1"] = f"سجل تدقيق النظام — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
+            ws["A1"].alignment = ca
+            ws.row_dimensions[1].height = 28
+            headers = ["#","التاريخ","المستخدم","الإجراء","العنصر","الوصف","IP","البيانات القديمة","البيانات الجديدة"]
+            for col, h in enumerate(headers, 1):
+                ws.cell(row=2, column=col, value=h)
+            style_header(2, len(headers))
+            result = AuditService.get_logs(1, 5000, {})
+            for ri, l in enumerate(result["items"], 3):
+                rd = [l.id, l.created_date, l.user_name, l.action,
+                      f"{l.resource}#{l.resource_id}" if l.resource_id else l.resource,
+                      l.description or "", l.ip_address or "",
+                      l.old_data or "", l.new_data or ""]
+                for col, val in enumerate(rd, 1):
+                    ws.cell(row=ri, column=col, value=val)
+                style_row(ri, len(headers), alt=ri%2==0)
+
         for col in ws.columns:
             width = max(len(str(c.value or "")) for c in col)
             ws.column_dimensions[get_column_letter(col[0].column)].width = min(width+4, 40)

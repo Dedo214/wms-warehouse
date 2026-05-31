@@ -312,6 +312,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
         <div class="sw2"><input type="text" id="invs" placeholder="بحث..." style="width:190px" oninput="debouncedLoadInv()"><span class="swi">🔍</span></div>
         <select style="width:auto" id="invcat" onchange="loadInv()"><option value="">كل الفئات</option></select>
         <button class="btn bp" onclick="openM('itmadd')">+ إضافة صنف</button>
+        <button class="btn bo bsm" onclick="bulkLabelDialog()">📋 باركودات</button>
         <button class="btn bo bsm" onclick="expXL('balance')">📤 Excel</button>
         <button class="btn bo bsm" onclick="expFile('csv','balance')">📄 CSV</button>
         <button class="btn bo bsm" onclick="expFile('pdf','balance')">🖨️ PDF</button>
@@ -526,7 +527,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
         <input type="date" id="auditFrom" style="width:auto;font-size:12px" onchange="loadAudit(1)">
         <input type="date" id="auditTo" style="width:auto;font-size:12px" onchange="loadAudit(1)">
         <button class="btn bp bsm" onclick="loadAudit(1)">🔍 بحث</button>
-        <button class="btn bs bsm" onclick="expFile('csv','audit')">📄 تصدير CSV</button>
+        <button class="btn bs bsm" onclick="expFile('csv','audit')">📄 CSV</button>
+        <button class="btn bs bsm" onclick="expFile('xlsx','audit')">📊 Excel</button>
+        <button class="btn bs bsm" onclick="expFile('pdf','audit')">🖨️ PDF</button>
       </div>
     </div>
     <div class="card">
@@ -1991,7 +1994,7 @@ async function rdAll(){await $api('POST','/api/notifications/read-all');document
 //  EXPORT & BACKUP
 // ══════════════════════════════════════════════
 async function expXL(type){try{const res=await fetch(`${API}/api/export/excel?type=${type}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;a.click();URL.revokeObjectURL(a.href);toast('تم تصدير الملف ✅','s');}catch(e){toast('خطأ: '+e.message,'e');}}
-async function expFile(fmt,type){try{let url;if(type==='audit'){const p=new URLSearchParams();const sf=document.getElementById('auditSearch')?.value;if(sf)p.set('search',sf);const ac=document.getElementById('auditAction')?.value;if(ac)p.set('action',ac);const df=document.getElementById('auditFrom')?.value;if(df)p.set('date_from',df);const dt=document.getElementById('auditTo')?.value;if(dt)p.set('date_to',dt);url=`${API}/api/audit-logs/export?${p.toString()}`;}else{url=`${API}/api/export/${fmt}?type=${type}`;}const res=await fetch(url,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.${fmt}`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${fmt.toUpperCase()} ✅`,'s');}catch(e){toast('خطأ: '+e.message,'e');}}
+async function expFile(fmt,type){try{const rte={xlsx:'excel'}[fmt]||fmt;let url;if(type==='audit'){const p=new URLSearchParams();const sf=document.getElementById('auditSearch')?.value;if(sf)p.set('search',sf);const ac=document.getElementById('auditAction')?.value;if(ac)p.set('action',ac);const df=document.getElementById('auditFrom')?.value;if(df)p.set('date_from',df);const dt=document.getElementById('auditTo')?.value;if(dt)p.set('date_to',dt);url=`${API}/api/export/${rte}?type=audit&${p.toString()}`;}else{url=`${API}/api/export/${rte}?type=${type}`;}const res=await fetch(url,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.${fmt}`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${fmt.toUpperCase()} ✅`,'s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function doBackup(){try{const res=await fetch(`${API}/api/backup`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل النسخ الاحتياطي','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wms_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();toast('تم تحميل النسخة الاحتياطية','s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function loadBkCfg(){
   document.getElementById('bckcfg').textContent='جاري التحميل...';
@@ -2156,6 +2159,8 @@ function wtag(n){if(!n||n==='—')return'<span style="color:var(--mut)">—</spa
 function stbdg(s,l){const cl={pending:'b-p',approved:'b-s',executed:'b-s',rejected:'b-d',partial:'b-i',completed:'b-s',cancelled:'b-d'}[s]||'b-n';return`<span class="bdg ${cl}">${l||s}</span>`;}
 function fmtN(n){return Math.round(n||0).toLocaleString('ar');}
 function h(str){const d=document.createElement('div');d.textContent=str||'';return d.innerHTML;}
+async function bulkLabelDialog(){const r=await $api('GET','/api/items?per_page=200');if(!r?.success){toast('فشل تحميل الأصناف','e');return;}const items=r.data.items||[];let html='<div style="max-height:400px;overflow-y:auto"><table style="width:100%"><thead><tr><th><input type="checkbox" id="blkall" onchange="document.querySelectorAll(\'.blkcb\').forEach(c=>c.checked=this.checked)"></th><th>الكود</th><th>الصنف</th><th>الوحدة</th></tr></thead><tbody>';items.forEach(it=>{html+=`<tr><td><input type="checkbox" class="blkcb" value="${it.id}"></td><td>${it.code}</td><td>${h(it.name)}</td><td>${it.unit}</td></tr>`;});html+='</tbody></table></div><div style="margin-top:8px"><button class="btn bp" onclick="bulkLabelPrint()">📋 طباعة الباركودات المحددة</button></div>';showModal(html,'📋 طباعة باركودات مجمعة');}
+async function bulkLabelPrint(){const ids=[...document.querySelectorAll('.blkcb:checked')].map(c=>parseInt(c.value));if(!ids.length){toast('اختر صنفاً واحداً على الأقل','e');return;}try{const res=await fetch(`${API}/api/items/bulk-labels`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${TOKEN}`},body:JSON.stringify({item_ids:ids})});if(!res.ok){toast('فشل طباعة الباركودات','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`bulk_barcodes_${new Date().toISOString().slice(0,10)}.pdf`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${ids.length} باركود ✅`,'s');if(document.getElementById('ov-__modal')?.closest('.ov'))document.getElementById('ov-__modal')?.closest('.ov').remove();}catch(e){toast('خطأ: '+e.message,'e');}}
 function curSym(){try{const s=JSON.parse(localStorage.getItem('wh_settings')||'{}');return{SAR:'ر.س',USD:'$',AED:'د.إ',EGP:'ج.م'}[s.currency]||'ر.س';}catch(e){return'ر.س';}}
 function stab(el,tid){document.getElementById(tid)?.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');}
 function mkPgBar(total,cur,fnStr){if(total<=1)return'';let h='';for(let i=1;i<=Math.min(total,10);i++) h+=`<button class="btn ${i===cur?'bp':'bo'} bxs" onclick="${fnStr.trim().replace('{i}',i)}">${i}</button>`;return h;}
