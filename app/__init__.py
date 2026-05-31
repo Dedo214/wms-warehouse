@@ -3,6 +3,7 @@ import os, socket, datetime, shutil
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from flask_socketio import SocketIO, emit, join_room
 from app.models import (db, User, Warehouse, Category, Supplier,
                          Item, Stock, StockMovement, Transfer,
                          InventoryCount, InventoryCountLine, Project,
@@ -15,6 +16,8 @@ from app.models import (db, User, Warehouse, Category, Supplier,
                          SupplierEvaluation, SupplierProfile)
 from app.middleware import register_jwt_callbacks, register_request_hooks, register_error_handlers
 from app.routes import api
+
+socketio = SocketIO()
 
 def get_local_ip():
     try:
@@ -36,10 +39,32 @@ def create_app(cfg=None):
          methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
          supports_credentials=True)
 
+    socketio.init_app(app, cors_allowed_origins="*")
+
     register_jwt_callbacks(jwt)
     register_request_hooks(app)
     register_error_handlers(app)
+
+    from flasgger import Swagger
+    Swagger(app, template={
+        "swagger": "2.0",
+        "info": {"title": "Alnubala WMS API", "version": "2.0.0", "description": "نظام إدارة المخازن والمشتريات"},
+        "basePath": "/api",
+        "securityDefinitions": {"Bearer": {"type": "apiKey", "name": "Authorization", "in": "header"}},
+    })
+
     app.register_blueprint(api)
+
+    @socketio.on("connect")
+    def ws_connect():
+        from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+        try:
+            verify_jwt_in_request(optional=True)
+            uid = get_jwt_identity()
+            if uid:
+                join_room(f"user_{uid}")
+        except:
+            pass
 
     @app.route("/health")
     def health():
@@ -66,6 +91,9 @@ def create_app(cfg=None):
         _seed(app)
     _init_scheduler(app)
     return app
+
+def get_socketio():
+    return socketio
 
 def _init_scheduler(app):
     try:

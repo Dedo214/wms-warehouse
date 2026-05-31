@@ -58,11 +58,20 @@ class NotificationService:
     @staticmethod
     def push(type_, title, message, ref_type=None, ref_id=None, roles=("admin","manager")):
         users = User.query.filter(User.role.in_(roles), User.is_active == True).all()
+        user_ids = []
         for u in users:
             db.session.add(Notification(
                 type=type_, title=title, message=message,
                 user_id=u.id, ref_type=ref_type, ref_id=ref_id,
             ))
+            user_ids.append(u.id)
+        try:
+            from app import get_socketio
+            sio = get_socketio()
+            for uid in user_ids:
+                sio.emit("notification_update", {"unread": 1}, to=f"user_{uid}")
+        except Exception:
+            pass
 
     @staticmethod
     def check_low_stock(item_id):

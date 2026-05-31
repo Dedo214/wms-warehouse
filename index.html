@@ -8,6 +8,7 @@
 <title>المخزن النوبلى - Alnubala Warehouse</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 <style>
 :root{
   --pr:#1B4F72;--prl:#2E86C1;--prll:#D6EAF8;
@@ -206,14 +207,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 <!-- APP -->
 <div class="app" id="apg" style="display:none">
 <nav class="sb" id="sbr">
-  <div class="sbl" onclick="toggleSB()"><span class="sbl-i">🏗️</span><div class="sbl-t"><h2>شركه النبلاء للمقاولات العامة والانشاءات</h2><p>نظام إدارة المخازن</p></div></div>
-  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">الرئيسية</span></div><div class="ns"><div class="ni on" data-p="dash"><span class="ni-i">📊</span><span class="nt">لوحة التحكم</span></div></div></div>
+  <div class="sbl" onclick="toggleSB()"><span class="sbl-i">🏗️</span><div class="sbl-t"><h2 data-i18n="company">شركه النبلاء للمقاولات العامة والانشاءات</h2><p>نظام إدارة المخازن</p></div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">الرئيسية</span></div><div class="ns"><div class="ni on" data-p="dash"><span class="ni-i">📊</span><span class="nt" data-i18n="dash">لوحة التحكم</span></div></div></div>
   <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المخزون</span></div><div class="ns">
-    <div class="ni" data-p="inv"><span class="ni-i">📦</span><span class="nt">الأصناف</span></div>
-    <div class="ni" data-p="movs"><span class="ni-i">↕️</span><span class="nt">الوارد والصرف</span></div>
-    <div class="ni" data-p="trans"><span class="ni-i">🔄</span><span class="nt">التحويلات</span><span class="nbg" id="tr-nbg" style="display:none">0</span></div>
-    <div class="ni" data-p="cnt"><span class="ni-i">🔢</span><span class="nt">الجرد</span></div>
-    <div class="ni" data-p="stkq"><span class="ni-i">🔍</span><span class="nt">حالة المخزون</span></div>
+    <div class="ni" data-p="inv"><span class="ni-i">📦</span><span class="nt" data-i18n="inv">الأصناف</span></div>
+    <div class="ni" data-p="movs"><span class="ni-i">↕️</span><span class="nt" data-i18n="movs">الوارد والصرف</span></div>
+    <div class="ni" data-p="trans"><span class="ni-i">🔄</span><span class="nt" data-i18n="trans">التحويلات</span><span class="nbg" id="tr-nbg" style="display:none">0</span></div>
+    <div class="ni" data-p="cnt"><span class="ni-i">🔢</span><span class="nt" data-i18n="cnt">الجرد</span></div>
+    <div class="ni" data-p="stkq"><span class="ni-i">🔍</span><span class="nt" data-i18n="stkq">حالة المخزون</span></div>
+  </div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المشتريات</span></div><div class="ns">
+    <div class="ni" data-p="purch"><span class="ni-i">🛒</span><span class="nt" data-i18n="purch">لوحة المشتريات</span></div>
+    <div class="ni" data-p="prrq"><span class="ni-i">📝</span><span class="nt" data-i18n="prrq">طلبات الشراء</span></div>
+    <div class="ni" data-p="rfqs"><span class="ni-i">📄</span><span class="nt" data-i18n="rfqs">طلب عروض أسعار</span></div>
+    <div class="ni" data-p="quotas"><span class="ni-i">💬</span><span class="nt" data-i18n="quotas">عروض الأسعار</span></div>
+    <div class="ni" data-p="pord"><span class="ni-i">📋</span><span class="nt" data-i18n="pord">أوامر الشراء</span></div>
+    <div class="ni" data-p="grns"><span class="ni-i">📥</span><span class="nt" data-i18n="grns">إستلام البضائع</span></div>
+    <div class="ni" data-p="pret"><span class="ni-i">↩️</span><span class="nt" data-i18n="pret">مرتجعات</span></div>
+    <div class="ni" data-p="peval"><span class="ni-i">⭐</span><span class="nt" data-i18n="peval">تقييم الموردين</span></div>
+    <div class="ni" data-p="prep"><span class="ni-i">📑</span><span class="nt" data-i18n="prep">تقارير المشتريات</span></div>
+  </div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">تقارير وتحليلات</span></div><div class="ns">
+    <div class="ni" data-p="rep"><span class="ni-i">📊</span><span class="nt" data-i18n="rep">التقارير</span></div>
+    <div class="ni" data-p="audit"><span class="ni-i">📋</span><span class="nt" data-i18n="audit">سجل العمليات</span></div>
+    <div class="ni" data-p="cfg"><span class="ni-i">⚙️</span><span class="nt" data-i18n="cfg">الإعدادات</span></div>
+  </div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">جهات</span></div><div class="ns">
+    <div class="ni" data-p="sup"><span class="ni-i">🏭</span><span class="nt" data-i18n="sup">الموردون</span></div>
+    <div class="ni" data-p="proj"><span class="ni-i">🏗️</span><span class="nt" data-i18n="proj">المشاريع</span></div>
+    <div class="ni" data-p="usrs"><span class="ni-i">👥</span><span class="nt" data-i18n="usrs">المستخدمون</span></div>
   </div></div>
   <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المشتريات</span></div><div class="ns">
     <div class="ni" data-p="purch"><span class="ni-i">🛒</span><span class="nt">لوحة المشتريات</span></div>
@@ -242,7 +264,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 <div class="main" id="mn">
   <div class="tb">
     <div style="display:flex;align-items:center;gap:10px;min-width:0">
-      <h1 id="pgtl">لوحة التحكم</h1>
+      <h1 id="pgtl" data-i18n="dash">لوحة التحكم</h1>
       <span class="bdg b-n" id="pgdt" style="font-size:10px;flex-shrink:0"></span>
     </div>
     <div class="tb-r">
@@ -250,6 +272,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <button class="bico" onclick="toggleGS()">🔍</button>
       <button class="nbb" onclick="openM('notifs');loadNotifs()">🔔<span class="nbd" id="nbd"></span></button>
       <button class="bico" id="dmBtn" onclick="toggleDark()" title="الوضع الليلي">🌙</button>
+      <button class="bico" onclick="window.open(API+'/docs/','_blank')" title="API Docs">📘</button>
+      <button class="bico" onclick="setLang(LANG==='en'?'ar':'en');toast(LANG==='en'?'🌐 English':'🌐 العربية','s')" title="اللغة" id="langBtn">🌐</button>
       <button class="btn bp bsm" onclick="openM('mov')">+ حركة</button>
       <div class="uc"><div class="av" id="tav">أح</div><span id="tnm">أحمد</span><span class="bdg b-i" id="trl" style="font-size:10px">مدير</span></div>
     </div>
@@ -496,6 +520,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <div class="card">
         <div class="ch"><div class="ct">⚙️ إعدادات النظام</div></div>
         <div class="fg"><label class="fl">اسم الشركة</label><input type="text" id="sco" value="شركه النبلاء للمقاولات العامة والانشاءات"></div>
+        <div class="fg"><label class="fl">🌐 اللغة</label><select id="langSel" onchange="setLang(this.value)"><option value="ar">🇸🇦 العربية</option><option value="en">🇬🇧 English</option></select></div>
         <div class="fg"><label class="fl">العملة</label><select id="curSel"><option value="SAR">ريال سعودي (ر.س)</option><option value="USD">دولار أمريكي ($)</option><option value="AED">درهم إماراتي (د.إ)</option><option value="EGP">جنيه مصري (ج.م)</option></select></div>
         <div class="fg"><label class="fl">التنبيهات</label>
           <div style="display:flex;flex-direction:column;gap:7px;margin-top:4px">
@@ -1151,6 +1176,7 @@ async function doLogout(){
   TOKEN='';CU=null;localStorage.removeItem('wh_tok');localStorage.removeItem('wh_user');
   document.getElementById('apg').style.display='none';
   document.getElementById('lpg').style.display='flex';
+  if(WS)try{WS.disconnect();}catch(e){}
 }
 async function chgPw(){
   const op=document.getElementById('sop').value,np=document.getElementById('snp').value,np2=document.getElementById('snp2').value;
@@ -1174,8 +1200,67 @@ async function startApp(){
   document.getElementById('pgdt').textContent=new Date().toLocaleDateString('ar-SA',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   await loadMeta();
   loadDash();
-  setInterval(chkNotifs,30000);chkNotifs();
+  chkNotifs();
+  connectWS();
 }
+
+// ══════════════════════════════════════════════
+//  WEBSOCKET
+// ══════════════════════════════════════════════
+let WS=null;
+function connectWS(){
+  if(WS)try{WS.disconnect();}catch(e){}
+  if(!TOKEN)return;
+  try{
+    WS=io(API.replace('/api',''),{auth:{token:TOKEN},transports:['websocket','polling'],reconnection:true});
+    WS.on('connect',()=>console.log('WS connected'));
+    WS.on('notification_update',()=>{
+      chkNotifs();
+      const tc=document.getElementById('tc');
+      if(tc){const t=document.createElement('div');t.className='toast t-s';t.innerHTML='<span>🔔</span><span style="flex:1">🔔 لديك إشعار جديد</span>';tc.appendChild(t);setTimeout(()=>{t.style.transition='opacity .3s,transform .3s';t.style.opacity='0';t.style.transform='translateY(10px)';setTimeout(()=>t.remove(),300);},4000);}
+    });
+    WS.on('disconnect',()=>console.log('WS disconnected'));
+  }catch(e){console.log('WS unavailable, using polling');}
+}
+
+// ══════════════════════════════════════════════
+//  i18n — ترجمة بين العربي والإنجليزي
+// ══════════════════════════════════════════════
+const L10N={
+  ar:{
+    title:'نظام إدارة المخازن',company:'شركه النبلاء للمقاولات العامة والانشاءات',
+    dash:'لوحة التحكم',inv:'الأصناف',movs:'الوارد والصرف',trans:'التحويلات',cnt:'الجرد',stkq:'حالة المخزون',
+    sup:'الموردون',proj:'المشاريع',usrs:'المستخدمون',rep:'التقارير',audit:'سجل العمليات',cfg:'الإعدادات',
+    purch:'لوحة المشتريات',prrq:'طلبات الشراء',rfqs:'طلب عروض أسعار',quotas:'عروض الأسعار',pord:'أوامر الشراء',
+    grns:'إستلام البضائع',pret:'مرتجعات',peval:'تقييم الموردين',prep:'تقارير المشتريات',
+    lang:'اللغة',dark:'الوضع الليلي',save:'حفظ الإعدادات',search:'بحث سريع...',
+    notifs:'التنبيهات',export_excel:'Excel',export_csv:'CSV',export_pdf:'PDF',
+    add_movement:'+ حركة',add:'إضافة',edit:'تعديل',delete:'حذف',cancel:'إلغاء',close:'إغلاق',
+  },
+  en:{
+    title:'WMS - Warehouse Management',company:'Alnubala General Contracting',
+    dash:'Dashboard',inv:'Items',movs:'In/Out',trans:'Transfers',cnt:'Count',stkq:'Stock Inquiry',
+    sup:'Suppliers',proj:'Projects',usrs:'Users',rep:'Reports',audit:'Audit Log',cfg:'Settings',
+    purch:'Purchasing',prrq:'PR',rfqs:'RFQ',quotas:'Quotations',pord:'PO',
+    grns:'GRN',pret:'Returns',peval:'Supplier Eval',prep:'Purchasing Reports',
+    lang:'Language',dark:'Dark Mode',save:'Save Settings',search:'Quick search...',
+    notifs:'Notifications',export_excel:'Excel',export_csv:'CSV',export_pdf:'PDF',
+    add_movement:'+ Movement',add:'Add',edit:'Edit',delete:'Delete',cancel:'Cancel',close:'Close',
+  }
+};
+let LANG=localStorage.getItem('wh_lang')||'ar';
+function t(key){const m=L10N[LANG]||L10N.ar;return m[key]||key;}
+function setLang(l){
+  LANG=l;localStorage.setItem('wh_lang',l);
+  document.documentElement.lang=LANG==='en'?'en':'ar';
+  document.documentElement.dir=LANG==='en'?'ltr':'rtl';
+  document.title=t('title')+' - '+t('company');
+  const sb=document.querySelector('.sbl-t h2');if(sb)sb.textContent=t('company');
+  const sel=document.getElementById('langSel');if(sel)sel.value=l;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{const k=el.getAttribute('data-i18n');if(k)el.textContent=t(k);});
+  if(CU){reNav();const cur=document.querySelector('.ni.on[data-p]');if(cur)document.getElementById('pgtl').textContent=t(cur.dataset.p)||PT[cur.dataset.p];}
+}
+function reNav(){document.querySelectorAll('.ni').forEach(el=>{const p=el.getAttribute('data-p');if(p&&PT[p])el.querySelector('.nt').textContent=t(p);});}
 
 async function loadMeta(){
   const [wR,cR,iR,sR]=await Promise.all([$api('GET','/api/warehouses'),$api('GET','/api/categories'),$api('GET','/api/items?per_page=200'),$api('GET','/api/suppliers')]);
@@ -1206,12 +1291,13 @@ function fsel(id,opts,prefix=''){const el=document.getElementById(id);if(!el)ret
 //  NAVIGATION
 // ══════════════════════════════════════════════
 const PT={dash:'لوحة التحكم',inv:'الأصناف',movs:'الوارد والصرف',trans:'التحويلات',cnt:'الجرد',stkq:'حالة المخزون',sup:'الموردون',proj:'المشاريع',usrs:'المستخدمون',rep:'التقارير',audit:'سجل العمليات',cfg:'الإعدادات',purch:'لوحة المشتريات',prrq:'طلبات الشراء',rfqs:'طلب عروض أسعار',quotas:'عروض الأسعار',pord:'أوامر الشراء',grns:'إستلام البضائع',pret:'مرتجعات',peval:'تقييم الموردين',prep:'تقارير المشتريات'};
+// use t(key) for translated labels
 function goP(p){
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.ni[data-p]').forEach(x=>x.classList.remove('on'));
   document.getElementById('page-'+p)?.classList.add('on');
   document.querySelector(`.ni[data-p="${p}"]`)?.classList.add('on');
-  document.getElementById('pgtl').textContent=PT[p]||p;
+  document.getElementById('pgtl').textContent=t(p)||PT[p]||p;
   const fns={dash:loadDash,inv:loadInv,movs:loadMovs,trans:()=>loadTrans(''),cnt:loadCnt,stkq:loadStkInq,sup:loadSup,proj:loadProj,usrs:loadUsrs,audit:()=>loadAudit(1),  cfg:()=>{loadDbStats();loadSettings();loadWhMgmt();loadCatMgmt();loadProjMgmt();loadBkCfg();},rep:()=>{if(!document.getElementById('repdf')?.value||!document.getElementById('repdt')?.value)setRepPeriod(30);currentRepId='bal';REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r==='bal'?'block':'none';});document.getElementById('repdatebar').style.display='none';loadBalRep();loadRepKpis();},purch:loadPurDash,prrq:()=>loadPRs(),rfqs:()=>loadRFQs(),quotas:()=>loadQts(),pord:()=>loadPOs(),grns:()=>loadGRNs(),pret:()=>loadReturns(),peval:()=>loadEvals(),prep:()=>{if(!document.getElementById('prepdf')?.value||!document.getElementById('prepdt')?.value)setPP('p',30);loadPurRep();}};
   if(fns[p]) fns[p]();
   // expand parent section if collapsed
@@ -1581,12 +1667,13 @@ function applyDark(state){
   if(cb)cb.checked=state;
 }
 function saveSettings(){
-  const d={company:document.getElementById('sco').value,currency:document.getElementById('curSel').value,notify_low:document.getElementById('chkLow').checked,notify_transfer:document.getElementById('chkTr').checked,dark:document.getElementById('chkDark').checked};
+  const d={company:document.getElementById('sco').value,currency:document.getElementById('curSel').value,notify_low:document.getElementById('chkLow').checked,notify_transfer:document.getElementById('chkTr').checked,dark:document.getElementById('chkDark').checked,lang:document.getElementById('langSel').value};
   localStorage.setItem('wh_settings',JSON.stringify(d));
   document.title='نظام إدارة المخازن - '+d.company;
   const sb=document.querySelector('.sbl-t h2');
   if(sb) sb.textContent=d.company;
   applyDark(d.dark);
+  setLang(d.lang);
   toast('تم حفظ الإعدادات ✅','s');
 }
 function loadSettings(){
@@ -1604,6 +1691,7 @@ function loadSettings(){
     if(d.notify_low!==undefined)document.getElementById('chkLow').checked=d.notify_low;
     if(d.notify_transfer!==undefined)document.getElementById('chkTr').checked=d.notify_transfer;
     if(d.dark!==undefined)applyDark(d.dark);
+    if(d.lang){document.getElementById('langSel').value=d.lang;setLang(d.lang);}
   }catch(e){}
 }
 function loadWhMgmt(){

@@ -39,6 +39,21 @@ api = Blueprint("api", __name__, url_prefix="/api")
 # ══════════════════════════════════════════════════════════════
 @api.route("/auth/login", methods=["POST"])
 def login():
+    """
+    User login
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          properties:
+            username: {type: string, example: admin}
+            password: {type: string, example: admin123}
+    responses:
+      200: {description: Login successful}
+      401: {description: Invalid credentials}
+    """
     data     = request.get_json() or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
@@ -97,6 +112,12 @@ def change_password():
 @api.route("/dashboard", methods=["GET"])
 @jwt_required()
 def dashboard():
+    """
+    Dashboard KPIs
+    ---
+    responses:
+      200: {description: Dashboard data with KPIs, warehouses, critical items}
+    """
     uid = int(get_jwt_identity())
     data = DashboardService.get_data(uid)
     return ok(data)
@@ -173,6 +194,33 @@ def update_category(cid):
 @api.route("/items", methods=["GET"])
 @jwt_required()
 def get_items():
+    """
+    List items
+    ---
+    parameters:
+      - name: search
+        in: query
+        type: string
+        required: false
+      - name: category_id
+        in: query
+        type: integer
+        required: false
+      - name: status
+        in: query
+        type: string
+        required: false
+      - name: page
+        in: query
+        type: integer
+        default: 1
+      - name: per_page
+        in: query
+        type: integer
+        default: 50
+    responses:
+      200: {description: Paginated items list}
+    """
     result = ItemService.get_list(
         search      = request.args.get("search",""),
         category_id = request.args.get("category_id"),
@@ -306,6 +354,23 @@ def get_movements():
 @api.route("/movements", methods=["POST"])
 @jwt_required()
 def create_movement():
+    """
+    Create stock movement
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          properties:
+            item_id: {type: integer}
+            warehouse_id: {type: integer}
+            quantity: {type: number}
+            type: {type: string, enum: [in, out, damage, return]}
+            unit_price: {type: number}
+    responses:
+      201: {description: Movement created}
+    """
     uid  = int(get_jwt_identity())
     user = User.query.get(uid)
     if user.role == "viewer": return forbidden("ليس لديك صلاحية تسجيل الحركات")
@@ -640,6 +705,12 @@ def get_audit_logs():
 @api.route("/reports/balance", methods=["GET"])
 @jwt_required()
 def report_balance():
+    """
+    Stock balance report
+    ---
+    responses:
+      200: {description: All items with quantities per warehouse}
+    """
     return ok(ReportService.balance())
 
 @api.route("/reports/daily", methods=["GET"])
@@ -1726,6 +1797,19 @@ def download_backup(name):
 @api.route("/backup/restore", methods=["POST"])
 @require_role("admin")
 def restore_backup():
+    """
+    Restore database from backup
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          properties:
+            name: {type: string, example: wms_backup_20250101_120000.db}
+    responses:
+      200: {description: Database restored}
+    """
     data = request.get_json() or {}
     name = data.get("name","")
     if not name: return err("يجب تحديد اسم ملف الاستعادة")
@@ -1824,6 +1908,10 @@ def submit_pr(pid):
             user_id=u.id, ref_type="pr", ref_id=pr.id))
     AuditService.log("submit","purchase_request",pid,f"تقديم طلب شراء: {pr.ref_number}")
     db.session.commit()
+    from app import get_socketio
+    sio = get_socketio()
+    for u in admins:
+        sio.emit("notification_update", {"unread": 1}, to=f"user_{u.id}")
     return ok(pr.to_dict())
 
 @api.route("/procurement/pr/<int:pid>/approve", methods=["POST"])
@@ -1843,6 +1931,10 @@ def approve_pr(pid):
             user_id=pr.requester_id, ref_type="pr", ref_id=pr.id))
     AuditService.log("approve","purchase_request",pid,f"اعتماد طلب شراء: {pr.ref_number}")
     db.session.commit()
+    from app import get_socketio
+    sio = get_socketio()
+    if pr.requester_id:
+        sio.emit("notification_update", {"unread": 1}, to=f"user_{pr.requester_id}")
     return ok(pr.to_dict())
 
 @api.route("/procurement/pr/<int:pid>/reject", methods=["POST"])
