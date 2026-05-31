@@ -850,3 +850,52 @@ class SupplierProfile(db.Model):
                 "response_speed":self.response_speed,
                 "price_competitiveness":self.price_competitiveness,
                 "total_evaluations":self.total_evaluations}
+
+class InventoryLayer(db.Model):
+    __tablename__ = "inventory_layers"
+    id          = db.Column(db.Integer, primary_key=True)
+    item_id     = db.Column(db.Integer, db.ForeignKey("items.id"), nullable=False, index=True)
+    warehouse_id= db.Column(db.Integer, db.ForeignKey("warehouses.id"), nullable=False)
+    quantity    = db.Column(db.Float, nullable=False, default=0)
+    unit_cost   = db.Column(db.Float, nullable=False, default=0)
+    ref_type    = db.Column(db.String(30))
+    ref_id      = db.Column(db.Integer)
+    created_at  = db.Column(db.DateTime, default=datetime.datetime.utcnow, index=True)
+    item     = db.relationship("Item")
+    warehouse= db.relationship("Warehouse")
+    def remaining_value(self): return round(self.quantity * self.unit_cost, 2)
+
+    @classmethod
+    def add_layer(cls, item_id, warehouse_id, qty, unit_cost, ref_type=None, ref_id=None):
+        layer = cls(item_id=item_id, warehouse_id=warehouse_id, quantity=qty, unit_cost=unit_cost, ref_type=ref_type, ref_id=ref_id)
+        db.session.add(layer)
+        return layer
+
+    @classmethod
+    def consume(cls, item_id, warehouse_id, qty):
+        layers = cls.query.filter_by(item_id=item_id, warehouse_id=warehouse_id).filter(cls.quantity > 0).order_by(cls.created_at).all()
+        remaining = qty
+        total_cost = 0.0
+        for layer in layers:
+            if remaining <= 0: break
+            take = min(layer.quantity, remaining)
+            layer.quantity -= take
+            remaining -= take
+            total_cost += take * layer.unit_cost
+        return total_cost, qty - remaining  # (total_cost, actually_consumed)
+
+    @classmethod
+    def get_valuation(cls, item_id, warehouse_id=None):
+        q = cls.query.filter(cls.quantity > 0)
+        if warehouse_id: q = q.filter_by(warehouse_id=warehouse_id)
+        q = q.filter_by(item_id=item_id)
+        total_qty = db.session.query(func.sum(cls.quantity)).filter(cls.item_id == item_id).scalar() or 0
+        total_val = db.session.query(func.sum(cls.quantity * cls.unit_cost)).filter(cls.item_id == item_id).scalar() or 0
+        avg_cost = round(total_val / total_qty, 2) if total_qty > 0 else 0
+        return {"item_id": item_id, "total_qty": total_qty, "total_value": round(total_val, 2), "avg_cost": avg_cost, "layers": [l.to_dict() for l in q.all()]}
+
+    def to_dict(self):
+        return {"id": self.id, "item_id": self.item_id, "item_name": self.item.name if self.item else "",
+                "warehouse_id": self.warehouse_id, "quantity": self.quantity, "unit_cost": self.unit_cost,
+                "remaining_value": self.remaining_value(), "ref_type": self.ref_type, "ref_id": self.ref_id,
+                "created_at": self.created_at.isoformat()}

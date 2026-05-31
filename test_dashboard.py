@@ -9,6 +9,9 @@ def test_dashboard_structure(client, auth):
     assert "warehouses" in d["data"]
     assert "chart_data" in d["data"]
     assert len(d["data"]["chart_data"]) == 7
+    assert "top_items" in d["data"]
+    assert "top_suppliers" in d["data"]
+    assert "po_chart" in d["data"]
 
 def test_dashboard_kpis(client, auth):
     r = client.get("/api/dashboard", headers=auth)

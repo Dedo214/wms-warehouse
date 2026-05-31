@@ -21,7 +21,7 @@ from app.models import (
     PurchaseOrder, POItem,
     GoodsReceipt, GRNItem,
     PurchaseReturn, PReturnItem,
-    SupplierEvaluation, SupplierProfile,
+    SupplierEvaluation, SupplierProfile, InventoryLayer,
 )
 from app.services import (
     AuthService, DashboardService, ItemService,
@@ -751,6 +751,180 @@ def procurement_export(fmt):
         doc.build(elements); buf.seek(0)
         return send_file(buf, mimetype="application/pdf", download_name=f"procurement_{fname_base}.pdf", as_attachment=True)
     return not_found("نوع الملف غير معروف")
+
+# ══════════════════════════════════════════════════════════════
+#  INVENTORY VALUATION & ADVANCED REPORTS
+# ══════════════════════════════════════════════════════════════
+@api.route("/stock/valuation", methods=["GET"])
+@jwt_required()
+def stock_valuation():
+    item_id = request.args.get("item_id", type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
+    if item_id:
+        return ok(InventoryLayer.get_valuation(item_id, warehouse_id))
+    items = Item.query.filter_by(is_active=True).all()
+    results = []
+    grand_qty = 0; grand_val = 0.0
+    for it in items:
+        v = InventoryLayer.get_valuation(it.id, warehouse_id)
+        if v["total_qty"] > 0:
+            results.append({"item_id":it.id, "item_name":it.name, "item_code":it.code, "item_unit":it.unit, **v})
+            grand_qty += v["total_qty"]; grand_val += v["total_value"]
+    return ok({"layers": results, "total_items": len(results), "grand_total_qty": grand_qty, "grand_total_value": round(grand_val, 2)})
+
+@api.route("/reports/consumption", methods=["GET"])
+@jwt_required()
+def consumption_report():
+    days = int(request.args.get("days", 30))
+    since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    limit = int(request.args.get("limit", 20))
+    order = request.args.get("order", "desc")
+    rows = db.session.query(
+        StockMovement.item_id, Item.name, Item.code, Item.unit,
+        func.sum(StockMovement.quantity).label("total_qty"),
+        func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
+        func.count(StockMovement.id).label("mov_count")
+    ).join(Item, StockMovement.item_id == Item.id
+    ).filter(StockMovement.type.in_(["out","transfer","damage"]),
+             StockMovement.created_at >= since
+    ).group_by(StockMovement.item_id
+    ).order_by(func.sum(StockMovement.quantity).desc() if order=="desc" else func.sum(StockMovement.quantity).asc()
+    ).limit(limit).all()
+    data = [{"item_id":r[0],"item_name":r[1],"item_code":r[2],"item_unit":r[3],
+             "total_qty":float(r[4]),"total_value":round(float(r[5] or 0),2),"movements":r[6],
+             "avg_per_day":round(float(r[4])/max(days,1),2)} for r in rows]
+    return ok({"items":data, "period_days":days, "order":order, "total":len(data)})
+
+@api.route("/reports/fast-slow", methods=["GET"])
+@jwt_required()
+def fast_slow_report():
+    days = int(request.args.get("days", 90))
+    since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    limit = int(request.args.get("limit", 10))
+    out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
+        StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
+    ).group_by(StockMovement.item_id).subquery()
+    items = db.session.query(Item.id, Item.name, Item.code, Item.unit, Item.unit_price,
+                             func.coalesce(out_q.c.qty, 0).label("consumed"),
+                             func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
+    ).outerjoin(out_q, Item.id == out_q.c.item_id
+    ).outerjoin(Stock, Stock.item_id == Item.id
+    ).group_by(Item.id).all()
+    fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
+    slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
+    def fmt(i): return {"item_id":i[0],"item_name":i[1],"item_code":i[2],"item_unit":i[3],"unit_price":float(i[4] or 0),"consumed":float(i[5] or 0),"current_stock":float(i[6] or 0)}
+    return ok({"fast_moving":[fmt(i) for i in fast],"slow_moving":[fmt(i) for i in slow],"period_days":days})
+
+@api.route("/reports/supplier-performance", methods=["GET"])
+@jwt_required()
+def supplier_performance():
+    rows = db.session.query(
+        Supplier.id, Supplier.name,
+        func.count(PurchaseOrder.id).label("po_count"),
+        func.sum(PurchaseOrder.total_amount).label("total_amount"),
+        func.count(GoodsReceipt.id).label("grn_count"),
+    ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
+    ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
+    ).group_by(Supplier.id).all()
+    data = [{"supplier_id":r[0],"supplier_name":r[1],"po_count":r[2],"total_amount":float(r[3] or 0),
+             "grn_count":r[4]} for r in rows]
+    evals = SupplierEvaluation.query.with_entities(
+        SupplierEvaluation.supplier_id,
+        func.avg(SupplierEvaluation.quality).label("avg_quality"),
+        func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
+        func.avg(SupplierEvaluation.price).label("avg_price")
+    ).group_by(SupplierEvaluation.supplier_id).all()
+    eval_map = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1),"price":round(float(e[3] or 0),1)} for e in evals}
+    for d in data:
+        d["evaluations"] = eval_map.get(d["supplier_id"], {})
+    return ok(data)
+
+# ══════════════════════════════════════════════════════════════
+#  FILE ATTACHMENTS — PROCUREMENT
+# ══════════════════════════════════════════════════════════════
+@api.route("/attachments", methods=["POST"])
+@jwt_required()
+def upload_attachment():
+    if "file" not in request.files:
+        return err("الملف مطلوب")
+    f = request.files["file"]
+    if not f.filename: return err("اسم الملف مطلوب")
+    ref_type = request.form.get("ref_type", "item")
+    ref_id = request.form.get("ref_id", type=int)
+    upload_dir = os.path.join(current_app.root_path, "..", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = f"{ref_type}_{ref_id}_{int(datetime.datetime.utcnow().timestamp())}_{f.filename}"
+    path = os.path.join(upload_dir, safe_name)
+    f.save(path)
+    size = os.path.getsize(path)
+    att = ItemAttachment(
+        item_id=ref_id if ref_type=="item" else 0,
+        filename=safe_name, original_name=f.filename,
+        file_type=ref_type, file_size=size, notes=request.form.get("notes",""),
+        uploaded_by=g.current_user.id,
+    )
+    db.session.add(att)
+    AuditService.log("create","attachment",att.id,f"رفع ملف: {f.filename}")
+    db.session.commit()
+    return created(att.to_dict(), "تم رفع الملف")
+
+@api.route("/attachments", methods=["GET"])
+@jwt_required()
+def list_attachments():
+    ref_type = request.args.get("ref_type")
+    ref_id = request.args.get("ref_id", type=int)
+    q = ItemAttachment.query
+    if ref_type: q = q.filter(ItemAttachment.file_type == ref_type)
+    if ref_id: q = q.filter(ItemAttachment.item_id == ref_id)
+    return ok([a.to_dict() for a in q.order_by(ItemAttachment.created_at.desc()).all()])
+
+@api.route("/attachments/<int:aid>/download", methods=["GET"])
+@jwt_required()
+def download_attachment(aid):
+    att = ItemAttachment.query.get_or_404(aid)
+    upload_dir = os.path.join(current_app.root_path, "..", "uploads")
+    return send_from_directory(upload_dir, att.filename, as_attachment=True, download_name=att.original_name)
+
+@api.route("/attachments/<int:aid>", methods=["DELETE"])
+@require_role("admin","manager")
+def delete_attachment(aid):
+    att = ItemAttachment.query.get_or_404(aid)
+    path = os.path.join(current_app.root_path, "..", "uploads", att.filename)
+    if os.path.isfile(path): os.remove(path)
+    db.session.delete(att)
+    AuditService.log("delete","attachment",aid,f"حذف ملف: {att.original_name}")
+    db.session.commit()
+    return ok(message="تم حذف الملف")
+
+# ══════════════════════════════════════════════════════════════
+#  CYCLE COUNT — VARIANCE REPORT & AUTO ADJUST
+# ══════════════════════════════════════════════════════════════
+@api.route("/inventory-counts/<int:cid>/variance", methods=["GET"])
+@jwt_required()
+def count_variance(cid):
+    ic = InventoryCount.query.get_or_404(cid)
+    return ok({"count": ic.to_dict(include_lines=True),
+               "variance_lines": [l.to_dict() for l in ic.lines if l.difference is not None and l.difference != 0],
+               "total_variance": sum(abs(l.difference or 0) for l in ic.lines if l.difference is not None)})
+
+@api.route("/inventory-counts/<int:cid>/auto-adjust", methods=["POST"])
+@require_role("admin","manager")
+def auto_adjust_count(cid):
+    ic = InventoryCount.query.get_or_404(cid)
+    if ic.status != "completed": return err("يجب إكمال الجرد أولاً")
+    adjustments = 0
+    for line in ic.lines:
+        if line.difference is not None and line.difference != 0:
+            stk = Stock.get_or_create(line.item_id, ic.warehouse_id)
+            stk.quantity = max(0, stk.quantity + line.difference)
+            StockMovement(ref_number=gen_ref("ADJ"), type="adjustment",
+                item_id=line.item_id, warehouse_id=ic.warehouse_id,
+                quantity=abs(line.difference), unit_price=line.item.unit_price if line.item else 0,
+                user_id=g.current_user.id, notes=f"تسوية جرد #{ic.ref_number}: فرق {line.difference:+.2f}")
+            adjustments += 1
+    AuditService.log("adjust","inventory_count",cid,f"تسوية جرد: {adjustments} صنف")
+    db.session.commit()
+    return ok(message=f"تم تسوية {adjustments} صنف")
 
 # ══════════════════════════════════════════════════════════════
 #  GENERATE PO FROM QUOTATION
@@ -1835,6 +2009,7 @@ def create_grn():
             stk = Stock.query.filter_by(item_id=item_id, warehouse_id=grn.warehouse_id).first()
             if stk: stk.quantity += accepted
             else: db.session.add(Stock(item_id=item_id, warehouse_id=grn.warehouse_id, quantity=accepted))
+            InventoryLayer.add_layer(item_id, grn.warehouse_id, accepted, unit_price, ref_type="grn", ref_id=grn.id)
     # update PO received quantities
     if grn.po_id:
         po = PurchaseOrder.query.get(grn.po_id)

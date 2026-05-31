@@ -2,7 +2,7 @@
 طبقة الخدمات — Business Logic Services
 كل المنطق التجاري معزول هنا بعيداً عن الـ routes
 """
-import datetime, json
+import datetime, json, calendar
 from sqlalchemy import func
 from flask import request
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
@@ -14,7 +14,7 @@ from app.models import (db, User, Warehouse, Category, Supplier, Item,
                          PurchaseOrder, POItem,
                          GoodsReceipt, GRNItem,
                          PurchaseReturn, PReturnItem,
-                         SupplierEvaluation, SupplierProfile)
+                         SupplierEvaluation, SupplierProfile, InventoryLayer)
 from app.utils import gen_ref, paginate, parse_date
 
 # ══════════════════════════════════════════════════════════════
@@ -187,6 +187,36 @@ class DashboardService:
         month_po_value = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
             PurchaseOrder.created_at >= month_start).scalar() or 0
 
+        # Top items by stock value
+        top_items = []
+        for it in sorted(items, key=lambda x: x.get_total_stock() * x.unit_price, reverse=True)[:10]:
+            s = it.get_total_stock()
+            top_items.append({"id":it.id,"name":it.name,"code":it.code,"unit":it.unit,
+                              "total_stock":s,"unit_price":it.unit_price,
+                              "total_value":round(s * it.unit_price, 2)})
+
+        # Top suppliers
+        top_suppliers = db.session.query(
+            Supplier.id, Supplier.name,
+            func.count(PurchaseOrder.id).label("po_count"),
+            func.sum(PurchaseOrder.total_amount).label("total_amount"),
+        ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
+        ).group_by(Supplier.id
+        ).order_by(func.sum(PurchaseOrder.total_amount).desc().nullslast()
+        ).limit(5).all()
+        supplier_data = [{"id":s[0],"name":s[1],"po_count":s[2],"total_amount":float(s[3] or 0)} for s in top_suppliers]
+
+        # Monthly procurement chart (last 6 months)
+        po_chart = []
+        month_names = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+        for i in range(5, -1, -1):
+            m = (today.replace(day=1) - datetime.timedelta(days=30*i)).replace(day=1)
+            _, days_in_month = calendar.monthrange(m.year, m.month)
+            m_end = m.replace(day=days_in_month)
+            total = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
+                PurchaseOrder.created_at >= m, PurchaseOrder.created_at <= m_end).scalar() or 0
+            po_chart.append({"month": month_names[m.month-1], "value": round(float(total), 2)})
+
         return {
             "kpis": {
                 "total_items":       len(items),
@@ -207,6 +237,9 @@ class DashboardService:
             "critical_items":       critical_items,
             "recent_movements":     [m.to_dict() for m in recent],
             "chart_data":           chart,
+            "po_chart":             po_chart,
+            "top_items":            top_items,
+            "top_suppliers":        supplier_data,
             "unread_notifications": unread,
         }
 
@@ -368,7 +401,18 @@ class MovementService:
         stock = Stock.get_or_create(item.id, wh_id)
         stock.quantity += qty if mtype in inc else -qty
 
+        # FIFO layer tracking
+        unit_cost = float(data.get("unit_price") or item.unit_price or 0)
+        if mtype in inc and qty > 0:
+            InventoryLayer.add_layer(item.id, wh_id, qty, unit_cost, ref_type="movement", ref_id=mov.id)
+        elif mtype in dec and qty > 0:
+            consumed_cost, consumed_qty = InventoryLayer.consume(item.id, wh_id, qty)
+            diff = qty - consumed_qty
+            if diff > 1e-6:
+                InventoryLayer.add_layer(item.id, wh_id, -diff, unit_cost, ref_type="movement_adj", ref_id=mov.id)
+
         lbl = StockMovement.TYPE_LABELS.get(mtype, mtype)
+
         AuditService.log("create","movement",mov.id,
                          f"{lbl}: {item.name} {qty} {item.unit}")
         db.session.commit()
