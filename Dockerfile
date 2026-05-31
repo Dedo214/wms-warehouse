@@ -7,4 +7,4 @@ COPY . .
 ENV FLASK_ENV=production
 ENV PORT=7860
 EXPOSE 7860
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 60 wsgi:application
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:application
