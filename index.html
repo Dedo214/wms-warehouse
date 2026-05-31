@@ -998,10 +998,12 @@ let invFilterStatus='',invFilterSearch='',invFilterCat='';
 // ══════════════════════════════════════════════
 //  FETCH WRAPPER
 // ══════════════════════════════════════════════
-async function $api(method,path,body=null){
+async function $api(method,path,body=null,extraHeaders={}){
   try{
-    const opts={method,headers:{'Content-Type':'application/json',...(TOKEN?{'Authorization':`Bearer ${TOKEN}`}:{})}};
-    if(body) opts.body=JSON.stringify(body);
+    const hdr={'Content-Type':'application/json',...(TOKEN?{'Authorization':`Bearer ${TOKEN}`}:{}),...extraHeaders};
+    if(body instanceof FormData){delete hdr['Content-Type'];}
+    const opts={method,headers:hdr};
+    if(body){opts.body=body instanceof FormData?body:JSON.stringify(body);}
     const res=await fetch(`${API}${path}`,opts);
     const data=await res.json();
     if(res.status===401){doLogout();return null;}
@@ -1790,6 +1792,30 @@ async function bcLookup(inpId,selId,code){
     }else toast(r?.error||'لم يتم العثور على الكود','e');
   }catch(e){toast('خطأ: '+e.message,'e');}
 }
+async function loadAtts(tp,id,contId){
+  const r=await $api('GET',`/api/attachments?ref_type=${tp}&ref_id=${id}`);
+  const el=document.getElementById(contId);
+  if(!el)return;
+  if(!r?.success||!r.data||!r.data.length){el.innerHTML='<div style="color:var(--mut);font-size:12px;padding:4px 0">لا توجد مرفقات</div>';return;}
+  el.innerHTML=r.data.map(a=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--bdr)"><a href="/api/attachments/${a.id}/download" style="text-decoration:none;color:var(--pr);font-size:13px" target="_blank">📎 ${a.original_name}</a><span style="font-size:11px;color:var(--mut)">${a.file_size?(a.file_size/1024).toFixed(1)+'KB':''}<button class="btn bxs bd" style="margin-right:6px" onclick="delAtt(${a.id},'${tp}','${id}','${contId}')">🗑️</button></span></div>`).join('');
+}
+async function delAtt(aid,tp,id,contId){
+  if(!confirm('حذف المرفق؟'))return;
+  const r=await $api('DELETE',`/api/attachments/${aid}`);
+  if(r?.success){toast('تم الحذف','s');loadAtts(tp,id,contId);}
+  else toast(r?.error||'فشل الحذف','e');
+}
+async function upAtt(tp,id){
+  const inp=document.getElementById(`${tp}file_${id}`);
+  if(!inp||!inp.files||!inp.files[0]){toast('اختر ملفاً أولاً','e');return;}
+  const fd=new FormData();
+  fd.append('file',inp.files[0]);
+  fd.append('ref_type',tp);
+  fd.append('ref_id',id);
+  const r=await $api('POST','/api/attachments',fd,{'Content-Type':'multipart/form-data'});
+  if(r?.success){toast('✅ تم رفع الملف','s');inp.value='';loadAtts(tp,id,`${tp}attslst_${id}`);}
+  else toast(r?.error||'فشل الرفع','e');
+}
 let bcHtml5Reader=null;
 let bcLastCode='';
 function openBC(selId,inpId){
@@ -1919,8 +1945,11 @@ async function showPRDetail(id){
     <div class="div"></div>
     <div class="ct">📋 سجل الاعتماد</div>
     <div class="tw"><table><thead><tr><th>المستوى</th><th>المعتمد</th><th>الإجراء</th><th>ملاحظات</th><th>التاريخ</th></tr></thead><tbody>${
-    (p.approvals||[]).map(a=>`<tr><td>${a.level||1}</td><td>${a.approver_name||'—'}</td><td>${a.action==='approve'?'✅ معتمد':'❌ مرفوض'}</td><td>${a.notes||'—'}</td><td style="font-size:11px">${a.created_date||''}</td></tr>`).join('')||'<tr><td colspan="5" class="ldg">لا توجد سجلات اعتماد</td></tr>'}</tbody></table></div>`;
+    (p.approvals||[]).map(a=>`<tr><td>${a.level||1}</td><td>${a.approver_name||'—'}</td><td>${a.action==='approve'?'✅ معتمد':'❌ مرفوض'}</td><td>${a.notes||'—'}</td><td style="font-size:11px">${a.created_date||''}</td></tr>`).join('')||'<tr><td colspan="5" class="ldg">لا توجد سجلات اعتماد</td></tr>'}</tbody></table></div>
+    <div class="div"></div><div class="ct">📎 المرفقات</div>
+    <div id="pratts"><div class="fg"><input type="file" id="prfile_${id}" class="fi"><button class="btn bs bsm" onclick="upAtt('pr','${id}')">📤 رفع ملف</button></div><div id="prattslst_${id}"></div></div>`;
   openM('prdetail');
+  loadAtts('pr',id,'prattslst_'+id);
 }
 
 let PReditId=null;
@@ -2134,8 +2163,11 @@ async function showPODetail(id){
     <div class="div"></div><div class="ct">📋 سجل الاعتماد</div>
     <div class="tw"><table><thead><tr><th>المستوى</th><th>المعتمد</th><th>الإجراء</th><th>ملاحظات</th><th>التاريخ</th></tr></thead><tbody>${
     (p.approvals||[]).map(a=>`<tr><td>${a.level||1}</td><td>${a.approver_name||'—'}</td><td>${a.action==='approve'?'✅ معتمد':'❌ مرفوض'}</td><td>${a.notes||'—'}</td><td style="font-size:11px">${a.created_date||''}</td></tr>`).join('')
-    }</tbody></table></div>`;
+    }</tbody></table></div>
+    <div class="div"></div><div class="ct">📎 المرفقات</div>
+    <div id="poatts"><div class="fg"><input type="file" id="pofile_${id}" class="fi"><button class="btn bs bsm" onclick="upAtt('po','${id}')">📤 رفع ملف</button></div><div id="poattslst_${id}"></div></div>`;
   openM('podetail');
+  loadAtts('po',id,'poattslst_'+id);
 }
 
 function openPOApprove(id){
@@ -2176,9 +2208,12 @@ async function showGRNDetail(id){
     <div><strong>ملاحظات:</strong> ${g.notes||'—'}</div>
     <div class="div"></div><div class="ct">🧾 الأصناف المستلمة</div>
     <div class="tw"><table><thead><tr><th>الصنف</th><th>المطلوب</th><th>المستلم</th><th>التالف</th><th>المرفوض</th></tr></thead><tbody>${
-    (g.items||[]).map(i=>`<tr><td>${i.item_name||'—'}</td><td>${i.ordered_qty||0}</td><td>${i.accepted_qty||0}</td><td>${i.damaged_qty||0}</td><td>${i.rejected_qty||0}</td></tr>`).join('')
-    }</tbody></table></div>`;
+     (g.items||[]).map(i=>`<tr><td>${i.item_name||'—'}</td><td>${i.ordered_qty||0}</td><td>${i.accepted_qty||0}</td><td>${i.damaged_qty||0}</td><td>${i.rejected_qty||0}</td></tr>`).join('')
+     }</tbody></table></div>
+    <div class="div"></div><div class="ct">📎 المرفقات</div>
+    <div id="grnatts"><div class="fg"><input type="file" id="grnfile_${id}" class="fi"><button class="btn bs bsm" onclick="upAtt('grn','${id}')">📤 رفع ملف</button></div><div id="grnattslst_${id}"></div></div>`;
   openM('grndetail');
+  loadAtts('grn',id,'grnattslst_'+id);
 }
 
 async function grnPOChanged(){
@@ -2266,7 +2301,10 @@ function showRetDetail(id){
       <div class="div"></div><div class="ct">🧾 الأصناف</div>
       <div class="tw"><table><thead><tr><th>الصنف</th><th>الكمية</th></tr></thead><tbody>${
       (p.items||[]).map(i=>`<tr><td>${i.item_name||'—'}</td><td>${i.quantity}</td></tr>`).join('')
-      }</tbody></table></div>`);
+      }</tbody></table></div>
+      <div class="div"></div><div class="ct">📎 المرفقات</div>
+      <div id="retatts"><div class="fg"><input type="file" id="retfile_${id}" class="fi"><button class="btn bs bsm" onclick="upAtt('preturn','${id}')">📤 رفع ملف</button></div><div id="retattslst_${id}"></div></div>`);
+    setTimeout(()=>loadAtts('preturn',id,'retattslst_'+id),100);
   })();
 }
 

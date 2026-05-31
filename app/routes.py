@@ -858,7 +858,7 @@ def upload_attachment():
     f.save(path)
     size = os.path.getsize(path)
     att = ItemAttachment(
-        item_id=ref_id if ref_type=="item" else 0,
+        item_id=ref_id,
         filename=safe_name, original_name=f.filename,
         file_type=ref_type, file_size=size, notes=request.form.get("notes",""),
         uploaded_by=g.current_user.id,
