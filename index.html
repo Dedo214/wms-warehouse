@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>المخزن النوبلى - Alnubala Warehouse</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 :root{
   --pr:#1B4F72;--prl:#2E86C1;--prll:#D6EAF8;
@@ -621,7 +622,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><select id="mvitm"><option value="">— اختر صنف —</option></select><span class="ferr" id="emvitm"></span></div><div class="fg"><label class="fl">المخزن *</label><select id="mvwh"></select></div></div>
     <div class="fr2"><div class="fg"><label class="fl">الكمية *</label><input type="number" id="mvqty" placeholder="0" min="0.01" step="0.01"><span class="ferr" id="emvqty"></span></div><div class="fg"><label class="fl">سعر الوحدة</label><input type="number" id="mvpr" placeholder="0"></div></div>
     <div class="fg"><label class="fl">المرجع</label><input type="text" id="mvref" placeholder="PO / REQ-..."></div>
-    <div class="fg"><label class="fl">📷 باركود</label><div class="ig"><input type="text" id="mvbc" placeholder="أدخل الكود"><button class="btn bo bsm" onclick="bcLookup('mvbc','mvitm')">🔍</button></div></div>
+    <div class="fg"><label class="fl">📷 باركود</label><div class="ig"><input type="text" id="mvbc" placeholder="أدخل الكود"><button class="btn bo bsm" onclick="bcLookup('mvbc','mvitm')">🔍</button><button class="btn bo bsm" onclick="openBC('mvitm','mvbc')">📸</button></div></div>
     <div class="fr2"><div class="fg"><label class="fl">👷 المهندس</label><input type="text" id="mveng" placeholder="اسم المهندس"></div><div class="fg"><label class="fl">ملاحظات</label><textarea id="mvnt" rows="2"></textarea></div></div>
     <div class="alert al-d" id="mverr" style="display:none"></div>
   </div>
@@ -632,7 +633,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mh"><div><div class="mt2">📥 استقبال وارد</div></div><button class="mc" onclick="closeM('movin')">×</button></div>
   <div class="mb">
     <div class="fr2"><div class="fg"><label class="fl">المشروع</label><select id="miproj"><option value="">— اختر مشروع —</option></select></div><div class="fg"><label class="fl">رقم أمر الشراء</label><input type="text" id="mipo" placeholder="PO-..."></div></div>
-    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><select id="miitm"><option value="">— اختر —</option></select></div><div class="fg"><label class="fl">المخزن *</label><select id="miwh"></select></div></div>
+    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><div class="ig"><select id="miitm"><option value="">— اختر —</option></select><button class="btn bo bxs" onclick="openBC('miitm')">📸</button></div></div><div class="fg"><label class="fl">المخزن *</label><select id="miwh"></select></div></div>
     <div class="fr2"><div class="fg"><label class="fl">الكمية *</label><input type="number" id="miqty" placeholder="0" min="0.01"></div><div class="fg"><label class="fl">سعر الوحدة</label><input type="number" id="mipr" placeholder="0"></div></div>
     <div class="fr2"><div class="fg"><label class="fl">👷 اسم المهندس</label><input type="text" id="mieng" placeholder="اسم المهندس"></div><div class="fg"><label class="fl">ملاحظات</label><textarea id="mint" rows="2"></textarea></div></div>
     <div class="alert al-d" id="mierr" style="display:none"></div>
@@ -644,7 +645,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mh"><div><div class="mt2">📤 إذن صرف</div></div><button class="mc" onclick="closeM('movout')">×</button></div>
   <div class="mb">
     <div class="fr2"><div class="fg"><label class="fl">المشروع</label><select id="moproj"><option value="">— اختر مشروع —</option></select></div><div class="fg"><label class="fl">رقم طلب الصرف</label><input type="text" id="moreq" placeholder="REQ-..."></div></div>
-    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><select id="moitm"><option value="">— اختر —</option></select></div><div class="fg"><label class="fl">المخزن *</label><select id="mowh"></select></div></div>
+    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><div class="ig"><select id="moitm"><option value="">— اختر —</option></select><button class="btn bo bxs" onclick="openBC('moitm')">📸</button></div></div><div class="fg"><label class="fl">المخزن *</label><select id="mowh"></select></div></div>
     <div class="fg"><label class="fl">الكمية *</label><input type="number" id="moqty" placeholder="0" min="0.01" oninput="ckStk('moitm','mowh',this.value,'mosw')"></div>
     <div class="alert al-w" id="mosw" style="display:none"></div>
     <div class="fr2"><div class="fg"><label class="fl">👷 اسم المهندس</label><input type="text" id="moeng" placeholder="اسم المهندس"></div><div class="fg"><label class="fl">ملاحظات</label><textarea id="mont" rows="2"></textarea></div></div>
@@ -657,7 +658,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mh"><div><div class="mt2">🔙 إضافة مرتجع</div><div class="ms">إرجاع أصناف إلى المخزن</div></div><button class="mc" onclick="closeM('movret')">×</button></div>
   <div class="mb">
     <div class="fr2"><div class="fg"><label class="fl">المشروع</label><select id="mrpj"><option value="">— اختر مشروع —</option></select></div><div class="fg"><label class="fl">رقم المرجع</label><input type="text" id="mrref" placeholder="RET-..."></div></div>
-    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><select id="mritm"><option value="">— اختر —</option></select></div><div class="fg"><label class="fl">المخزن *</label><select id="mrwh"></select></div></div>
+    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><div class="ig"><select id="mritm"><option value="">— اختر —</option></select><button class="btn bo bxs" onclick="openBC('mritm')">📸</button></div></div><div class="fg"><label class="fl">المخزن *</label><select id="mrwh"></select></div></div>
     <div class="fr2"><div class="fg"><label class="fl">الكمية *</label><input type="number" id="mrqty" placeholder="0" min="0.01"></div><div class="fg"><label class="fl">سعر الوحدة</label><input type="number" id="mrpr" placeholder="0"></div></div>
     <div class="fr2"><div class="fg"><label class="fl">👷 اسم المهندس</label><input type="text" id="mreng" placeholder="اسم المهندس"></div><div class="fg"><label class="fl">ملاحظات</label><textarea id="mrnt" rows="2" placeholder="سبب الإرجاع"></textarea></div></div>
     <div class="alert al-d" id="mrerr" style="display:none"></div>
@@ -669,7 +670,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mh"><div><div class="mt2">⚠️ إضافة هالك</div><div class="ms">تسجيل أصناف تالفة أو مستهلكة</div></div><button class="mc" onclick="closeM('movdam')">×</button></div>
   <div class="mb">
     <div class="fr2"><div class="fg"><label class="fl">المشروع</label><select id="mdpj"><option value="">— اختر مشروع —</option></select></div><div class="fg"><label class="fl">رقم المرجع</label><input type="text" id="mdref" placeholder="DAM-..."></div></div>
-    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><select id="mditm"><option value="">— اختر —</option></select></div><div class="fg"><label class="fl">المخزن *</label><select id="mdwh"></select></div></div>
+    <div class="fr2"><div class="fg"><label class="fl">الصنف *</label><div class="ig"><select id="mditm"><option value="">— اختر —</option></select><button class="btn bo bxs" onclick="openBC('mditm')">📸</button></div></div><div class="fg"><label class="fl">المخزن *</label><select id="mdwh"></select></div></div>
     <div class="fr2"><div class="fg"><label class="fl">الكمية *</label><input type="number" id="mdqty" placeholder="0" min="0.01"></div><div class="fg"><label class="fl">👷 اسم المهندس</label><input type="text" id="mdeng" placeholder="اسم المهندس"></div></div>
     <div class="fg"><label class="fl">ملاحظات</label><textarea id="mdnt" rows="2" placeholder="سبب الهالك / وصف التلف"></textarea></div>
     <div class="alert al-d" id="mderr" style="display:none"></div>
@@ -781,6 +782,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 <div class="ov" id="ov-notifs"><div class="modal" style="max-width:400px">
   <div class="mh"><div class="mt2">🔔 التنبيهات</div><button class="mc" onclick="closeM('notifs')">×</button></div>
   <div class="mb"><div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn bg2 bsm" onclick="rdAll()">تحديد الكل كمقروء</button></div><div id="notiflst" style="max-height:400px;overflow-y:auto"></div></div>
+</div></div>
+
+<div class="ov" id="ov-bcscanner"><div class="modal" style="max-width:420px">
+  <div class="mh"><div class="mt2">📸 ماسح الباركود</div><button class="mc" onclick="closeBC()">×</button></div>
+  <div class="mb" style="text-align:center">
+    <div id="bcreader" style="width:100%;max-width:380px;margin:0 auto"></div>
+    <div id="bcresult" style="margin-top:10px;font-size:13px;color:var(--mut)"></div>
+  </div>
 </div></div>
 
 <!-- WAREHOUSE ADD/EDIT MODAL -->
@@ -1764,11 +1773,14 @@ async function loadDbStats(){const r=await $api('GET','/api/dashboard');if(!r?.s
 // ══════════════════════════════════════════════
 //  BARCODE & SEARCH
 // ══════════════════════════════════════════════
-async function bcLookup(inpId,selId){
+async function bcLookup(inpId,selId,code){
   try{
-    const inp=document.getElementById(inpId);
-    if(!inp){toast('حقل الباركود غير موجود','e');return;}
-    const code=inp.value.trim();
+    if(!code){
+      if(inpId==='__bc_direct__'){toast('خطأ داخلي','e');return;}
+      const inp=document.getElementById(inpId);
+      if(!inp){toast('حقل الباركود غير موجود','e');return;}
+      code=inp.value.trim();
+    }
     if(!code){toast('أدخل الباركود أولاً','e');return;}
     const r=await $api('GET',`/api/items/scan/${encodeURIComponent(code)}`);
     if(r?.success){
@@ -1777,6 +1789,36 @@ async function bcLookup(inpId,selId){
       toast(`تم العثور على: ${r.data.name}`,'s');
     }else toast(r?.error||'لم يتم العثور على الكود','e');
   }catch(e){toast('خطأ: '+e.message,'e');}
+}
+let bcHtml5Reader=null;
+let bcLastCode='';
+function openBC(selId,inpId){
+  document.getElementById('bcresult').textContent='جاري تشغيل الكاميرا...';
+  showM('ov-bcscanner');
+  bcLastCode='';
+  if(bcHtml5Reader){bcHtml5Reader.clear();bcHtml5Reader=null;}
+  bcHtml5Reader=new Html5Qrcode("bcreader");
+  bcHtml5Reader.start({facingMode:"environment"},
+    {fps:10,qrbox:{width:250,height:150}},
+    function(code){
+      bcHtml5Reader.stop().catch(()=>{});
+      bcLastCode=code;
+      document.getElementById('bcresult').textContent=`تم المسح: ${code}`;
+      if(inpId){
+        const inp=document.getElementById(inpId);
+        if(inp){inp.value=code;}
+      }
+      closeBC();
+      if(selId){bcLookup(inpId||'__bc_direct__',selId,code);}
+    },
+    function(){}
+  ).catch(function(err){
+    document.getElementById('bcresult').textContent='❌ فشل تشغيل الكاميرا: '+err;
+  });
+}
+function closeBC(){
+  if(bcHtml5Reader){bcHtml5Reader.stop().catch(()=>{});bcHtml5Reader=null;}
+  closeM('ov-bcscanner');
 }
 async function gSearch(q){if(!q||q.length<2)return;const r=await $api('GET',`/api/items?search=${encodeURIComponent(q)}&per_page=50`);if(r?.success&&r.data.items.length){goP('inv');ITEMS=r.data.items;document.getElementById('invbd').innerHTML=ITEMS.map(item=>{const wc=WHS.map(wh=>`<td>${(item.warehouse_stocks||[]).find(ws=>ws.warehouse_id===wh.id)?.quantity??0}</td>`).join('');const sc=item.status==='critical'?'<span class="bdg b-d">حرج</span>':item.status==='warning'?'<span class="bdg b-w">تحذير</span>':'<span class="bdg b-s">جيد</span>';return`<tr><td class="tn">${item.code}</td><td class="tb2">${item.name}</td><td>${item.category_name}</td>${wc}<td style="font-weight:700">${item.total_stock}</td><td>${item.unit}</td><td>${item.min_quantity}</td><td>${sc}</td><td><button class="btn bxs bo" onclick="showItmDt(${item.id})">📋</button></td></tr>`;}).join('');document.getElementById('invcnt').textContent=`${r.data.total} نتيجة لـ "${q}"`;toast(`${r.data.total} نتيجة`,'s');}}
 
