@@ -1,14 +1,15 @@
 """pytest fixtures"""
-import pytest, sys, os
+import pytest, sys, os, copy
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import config
-config.DevelopmentConfig.SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+cfg = copy.deepcopy(config.TestingConfig)
+cfg.SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
 
 from app import create_app
 
 @pytest.fixture(scope="session")
 def app():
-    app = create_app()
+    app = create_app(cfg)
     app.config["TESTING"] = True
     yield app
 

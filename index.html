@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a73e8">
 <title>المخزن النوبلى - Alnubala Warehouse</title>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
@@ -504,12 +509,28 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 
   <!-- AUDIT -->
   <div class="page" id="page-audit">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-weight:700">سجل العمليات</div>
-      <button class="btn bp bsm" onclick="loadAudit(1)">🔄 تحديث</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div style="font-weight:700">📋 سجل العمليات</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input type="text" id="auditSearch" placeholder="بحث..." style="width:120px;font-size:12px" onkeydown="if(event.key==='Enter')loadAudit(1)">
+        <select id="auditAction" style="width:auto;font-size:12px" onchange="loadAudit(1)">
+          <option value="">كل الإجراءات</option>
+          <option value="create">➕ إضافة</option>
+          <option value="update">✏️ تحديث</option>
+          <option value="delete">🗑️ حذف</option>
+          <option value="approve">✅ اعتماد</option>
+          <option value="reject">❌ رفض</option>
+          <option value="login">🔑 دخول</option>
+          <option value="logout">🚪 خروج</option>
+        </select>
+        <input type="date" id="auditFrom" style="width:auto;font-size:12px" onchange="loadAudit(1)">
+        <input type="date" id="auditTo" style="width:auto;font-size:12px" onchange="loadAudit(1)">
+        <button class="btn bp bsm" onclick="loadAudit(1)">🔍 بحث</button>
+        <button class="btn bs bsm" onclick="expFile('csv','audit')">📄 تصدير CSV</button>
+      </div>
     </div>
     <div class="card">
-      <div class="tw tscr"><table><thead><tr><th>#</th><th>التاريخ</th><th>المستخدم</th><th>الإجراء</th><th>العنصر</th><th>الوصف</th></tr></thead><tbody id="auditbd"></tbody></table></div>
+      <div class="tw tscr"><table><thead><tr><th>#</th><th>التاريخ</th><th>المستخدم</th><th>الإجراء</th><th>العنصر</th><th>الوصف</th><th>IP</th><th></th></tr></thead><tbody id="auditbd"></tbody></table></div>
       <div id="auditpg" class="pgb" style="padding-top:10px;border-top:1px solid var(--bdr);margin-top:10px"></div>
     </div>
   </div>
@@ -1960,7 +1981,8 @@ async function loadValRep(){const r=await $api('GET','/api/stock/valuation');if(
 // ══════════════════════════════════════════════
 //  AUDIT & NOTIFICATIONS
 // ══════════════════════════════════════════════
-async function loadAudit(page=1){auditPg=page;const r=await $api('GET',`/api/audit-logs?page=${page}&per_page=30`);if(!r?.success)return;const{logs,total,pages}=r.data;const amap={login:'🔑 دخول',logout:'🚪 خروج',create:'➕ إضافة',update:'✏️ تحديث',delete:'🗑️ حذف',approve:'✅ اعتماد',reject:'❌ رفض',complete:'🔢 إغلاق جرد',login_failed:'⛔ فشل دخول'};document.getElementById('auditbd').innerHTML=logs.map(l=>`<tr><td class="tn">${l.id}</td><td class="tn" style="font-size:11px">${l.created_date}</td><td class="tb2">${l.user_name}</td><td>${amap[l.action]||l.action}</td><td style="font-size:12px">${l.resource}${l.resource_id?` #${l.resource_id}`:''}</td><td style="font-size:12px;color:var(--mut)">${l.description||'—'}</td></tr>`).join('')||'<tr><td colspan="6" class="ldg">لا توجد سجلات</td></tr>';  document.getElementById('auditpg').innerHTML=mkPgBar(pages,page,`loadAudit({i})`);}
+async function loadAudit(page=1){auditPg=page;const p=new URLSearchParams({page,per_page:30});const sf=document.getElementById('auditSearch')?.value;if(sf)p.set('search',sf);const ac=document.getElementById('auditAction')?.value;if(ac)p.set('action',ac);const df=document.getElementById('auditFrom')?.value;if(df)p.set('date_from',df);const dt=document.getElementById('auditTo')?.value;if(dt)p.set('date_to',dt);const r=await $api('GET',`/api/audit-logs?${p.toString()}`);if(!r?.success)return;const{logs,total,pages}=r.data;const amap={login:'🔑 دخول',logout:'🚪 خروج',create:'➕ إضافة',update:'✏️ تحديث',delete:'🗑️ حذف',approve:'✅ اعتماد',reject:'❌ رفض',complete:'🔢 إغلاق جرد',login_failed:'⛔ فشل دخول'};document.getElementById('auditbd').innerHTML=logs.map(l=>`<tr><td class="tn">${l.id}</td><td class="tn" style="font-size:11px">${l.created_date}</td><td class="tb2">${h(l.user_name)}</td><td>${amap[l.action]||l.action}</td><td style="font-size:12px">${h(l.resource)}${l.resource_id?` #${l.resource_id}`:''}</td><td style="font-size:12px;color:var(--mut)">${h(l.description)||'—'}</td><td style="font-size:11px;font-family:monospace;direction:ltr">${l.ip_address||'—'}</td><td>${l.old_data||l.new_data?`<button class="btn bxs bo" onclick="auditDetail(${l.id})">🔍</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="ldg">لا توجد سجلات</td></tr>';document.getElementById('auditpg').innerHTML=mkPgBar(pages,page,`loadAudit({i})`);}
+async function auditDetail(id){const r=await $api('GET',`/api/audit-logs?per_page=1&page=1&search=${id}`);if(!r?.success||!r.data.logs.length)return;const l=r.data.logs[0];let html=`<div style="font-size:13px;line-height:1.8"><strong>#${l.id}</strong> — ${h(l.description)}<br><br>`;if(l.old_data){try{const o=JSON.parse(l.old_data);html+=`<strong>البيانات القديمة:</strong><pre style="background:var(--bg);padding:8px;border-radius:4px;font-size:11px;direction:ltr;text-align:left;overflow-x:auto">${h(JSON.stringify(o,null,2))}</pre><br>`;}catch(e){html+=`<strong>البيانات القديمة:</strong> ${h(l.old_data)}<br>`;}}if(l.new_data){try{const n=JSON.parse(l.new_data);html+=`<strong>البيانات الجديدة:</strong><pre style="background:var(--bg);padding:8px;border-radius:4px;font-size:11px;direction:ltr;text-align:left;overflow-x:auto">${h(JSON.stringify(n,null,2))}</pre><br>`;}catch(e){html+=`<strong>البيانات الجديدة:</strong> ${h(l.new_data)}<br>`;}}html+=`<strong>IP:</strong> ${l.ip_address||'—'}<br>`;html+=`</div>`;showModal(html,`📋 تفاصيل السجل #${l.id}`);}
 async function chkNotifs(){if(!TOKEN)return;const r=await $api('GET','/api/notifications');if(r?.success){const cnt=r.data.unread||0;const el=document.getElementById('nbd');el.classList.toggle('on',cnt>0);el.textContent=cnt>0?cnt:'';}}
 async function loadNotifs(){const r=await $api('GET','/api/notifications');if(!r?.success)return;const ico={low_stock:'⚠️',transfer_request:'🔄',count_diff:'⚖️',reorder:'📋'};document.getElementById('notiflst').innerHTML=r.data.notifications.map(n=>`<div style="padding:10px;border-bottom:1px solid var(--bdr);display:flex;gap:8px;${n.is_read?'':'background:var(--prll)'}"><span style="font-size:17px">${ico[n.type]||'🔔'}</span><div><div style="font-weight:600;font-size:13px">${n.title}</div><div style="font-size:12px;color:var(--mut);margin-top:2px">${n.message}</div><div style="font-size:11px;color:var(--mut2);margin-top:3px">${n.time_ago}</div></div></div>`).join('')||'<div style="text-align:center;padding:20px;color:var(--mut)">لا توجد تنبيهات 🎉</div>';}
 async function rdAll(){await $api('POST','/api/notifications/read-all');document.getElementById('nbd').classList.remove('on');loadNotifs();}
@@ -1969,7 +1991,7 @@ async function rdAll(){await $api('POST','/api/notifications/read-all');document
 //  EXPORT & BACKUP
 // ══════════════════════════════════════════════
 async function expXL(type){try{const res=await fetch(`${API}/api/export/excel?type=${type}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;a.click();URL.revokeObjectURL(a.href);toast('تم تصدير الملف ✅','s');}catch(e){toast('خطأ: '+e.message,'e');}}
-async function expFile(fmt,type){try{const res=await fetch(`${API}/api/export/${fmt}?type=${type}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.${fmt}`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${fmt.toUpperCase()} ✅`,'s');}catch(e){toast('خطأ: '+e.message,'e');}}
+async function expFile(fmt,type){try{let url;if(type==='audit'){const p=new URLSearchParams();const sf=document.getElementById('auditSearch')?.value;if(sf)p.set('search',sf);const ac=document.getElementById('auditAction')?.value;if(ac)p.set('action',ac);const df=document.getElementById('auditFrom')?.value;if(df)p.set('date_from',df);const dt=document.getElementById('auditTo')?.value;if(dt)p.set('date_to',dt);url=`${API}/api/audit-logs/export?${p.toString()}`;}else{url=`${API}/api/export/${fmt}?type=${type}`;}const res=await fetch(url,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.${fmt}`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${fmt.toUpperCase()} ✅`,'s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function doBackup(){try{const res=await fetch(`${API}/api/backup`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل النسخ الاحتياطي','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wms_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();toast('تم تحميل النسخة الاحتياطية','s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function loadBkCfg(){
   document.getElementById('bckcfg').textContent='جاري التحميل...';
@@ -2120,12 +2142,20 @@ async function gSearch(q){if(!q||q.length<2)return;const r=await $api('GET',`/ap
 // ══════════════════════════════════════════════
 function openM(id){document.getElementById('ov-'+id)?.classList.add('open');}
 function closeM(id){document.getElementById('ov-'+id)?.classList.remove('open');}
+function showModal(html,title){
+  const id='__modal_'+Date.now();
+  const ov=document.createElement('div');ov.className='ov open';ov.id='ov-'+id;
+  ov.innerHTML=`<div class="modal" style="max-width:600px"><div class="mh"><div class="mt2">${title||''}</div><button class="mc" onclick="this.closest('.ov').remove()">×</button></div><div class="mb">${html}</div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+}
 document.querySelectorAll('.ov').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open');}));
 function tbdg(t){return{in:'<span class="bdg b-s">📥 وارد</span>',out:'<span class="bdg b-d">📤 صرف</span>',transfer:'<span class="bdg b-i">🔄 تحويل</span>',adjustment:'<span class="bdg b-n">⚖️ تسوية</span>',return:'<span class="bdg b-p">🔙 مرتجع</span>',damage:'<span class="bdg b-d">⚠️ هالك</span>'}[t]||`<span class="bdg b-n">${t}</span>`;}
 function setSel(id,v){const e=document.getElementById(id);if(e)e.value=v;}
 function wtag(n){if(!n||n==='—')return'<span style="color:var(--mut)">—</span>';const cl=n.includes('الرئيسي')?'wm':n.includes('الأول')||n.includes('الفرع 1')?'ws1':'ws2';return`<span class="wt ${cl}">${n}</span>`;}
 function stbdg(s,l){const cl={pending:'b-p',approved:'b-s',executed:'b-s',rejected:'b-d',partial:'b-i',completed:'b-s',cancelled:'b-d'}[s]||'b-n';return`<span class="bdg ${cl}">${l||s}</span>`;}
 function fmtN(n){return Math.round(n||0).toLocaleString('ar');}
+function h(str){const d=document.createElement('div');d.textContent=str||'';return d.innerHTML;}
 function curSym(){try{const s=JSON.parse(localStorage.getItem('wh_settings')||'{}');return{SAR:'ر.س',USD:'$',AED:'د.إ',EGP:'ج.م'}[s.currency]||'ر.س';}catch(e){return'ر.س';}}
 function stab(el,tid){document.getElementById(tid)?.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');}
 function mkPgBar(total,cur,fnStr){if(total<=1)return'';let h='';for(let i=1;i<=Math.min(total,10);i++) h+=`<button class="btn ${i===cur?'bp':'bo'} bxs" onclick="${fnStr.trim().replace('{i}',i)}">${i}</button>`;return h;}
@@ -2133,7 +2163,6 @@ function shFe(id,msg){const e=document.getElementById(id);if(e){e.textContent=ms
 function shAe(id,msg){const e=document.getElementById(id);if(e){e.innerHTML=msg.replace(/\n/g,'<br>');e.style.display='flex';}}
 function clrErr(ids){ids.forEach(id=>{const e=document.getElementById(id);if(e){e.textContent='';e.classList.remove('on');e.style.display='none';}});}
 function toast(msg,type=''){const tc=document.getElementById('tc');const t=document.createElement('div');t.className='toast'+(type?' t-'+type:'');t.innerHTML=`<span>${{s:'✅',e:'❌',w:'⚠️'}[type]||'ℹ️'}</span><span style="flex:1">${msg}</span>`;tc.appendChild(t);setTimeout(()=>{t.style.transition='opacity .3s,transform .3s';t.style.opacity='0';t.style.transform='translateY(10px)';setTimeout(()=>t.remove(),300);},4000);}
-function deb(fn,delay){let t;return function(...a){clearTimeout(t);t=setTimeout(()=>fn(...a),delay);};}
 document.addEventListener('click',function(e){var btn=e.target.closest('[data-act]');if(!btn)return;var act=btn.getAttribute('data-act');switch(act){
   case'saveSettings':(function(){var d={company:document.getElementById('sco').value,currency:document.getElementById('curSel').value,notify_low:document.getElementById('chkLow').checked,notify_transfer:document.getElementById('chkTr').checked};localStorage.setItem('wh_settings',JSON.stringify(d));document.title='نظام إدارة المخازن - '+d.company;var sb=document.querySelector('.sbl-t h2');if(sb)sb.textContent=d.company;toast('تم الحفظ ✅','s');})();break;
   case'doBackup':(async function(){try{var res=await fetch(API+'/api/backup',{headers:{Authorization:'Bearer '+TOKEN}});if(!res.ok){toast('فشل النسخ الاحتياطي','e');return;}var blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='wms_backup_'+(new Date().toISOString().slice(0,10))+'.json';a.click();toast('تم تحميل النسخة الاحتياطية','s');}catch(e){toast('خطأ: '+e.message,'e');}})();break;

@@ -46,8 +46,22 @@ class AuditService:
             pass  # never crash on audit
 
     @staticmethod
-    def get_logs(page=1, per_page=50):
-        q = AuditLog.query.order_by(AuditLog.created_at.desc())
+    def get_logs(page=1, per_page=50, filters=None):
+        q = AuditLog.query
+        if filters:
+            if filters.get("user_id"):
+                q = q.filter(AuditLog.user_id == int(filters["user_id"]))
+            if filters.get("action"):
+                q = q.filter(AuditLog.action == filters["action"])
+            if filters.get("resource"):
+                q = q.filter(AuditLog.resource == filters["resource"])
+            if filters.get("date_from"):
+                q = q.filter(AuditLog.created_at >= filters["date_from"])
+            if filters.get("date_to"):
+                q = q.filter(AuditLog.created_at <= filters["date_to"] + datetime.timedelta(days=1))
+            if filters.get("search"):
+                q = q.filter(AuditLog.description.ilike(f'%{filters["search"]}%'))
+        q = q.order_by(AuditLog.created_at.desc())
         return paginate(q, page, per_page)
 
 

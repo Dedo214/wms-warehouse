@@ -4,6 +4,7 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO, emit, join_room
+from app.limiter import limiter
 from app.models import (db, User, Warehouse, Category, Supplier,
                          Item, Stock, StockMovement, Transfer,
                          InventoryCount, InventoryCountLine, Project,
@@ -40,6 +41,8 @@ def create_app(cfg=None):
          supports_credentials=True)
 
     socketio.init_app(app, cors_allowed_origins="*")
+
+    limiter.init_app(app)
 
     register_jwt_callbacks(jwt)
     register_request_hooks(app)
@@ -82,6 +85,13 @@ def create_app(cfg=None):
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
         return resp
+
+    @app.route("/manifest.json")
+    def manifest():
+        return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "..", "manifest.json")
+    @app.route("/sw.js")
+    def sw():
+        return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "..", "sw.js")
 
     with app.app_context():
         os.makedirs(app.config.get("UPLOAD_FOLDER","uploads"), exist_ok=True)

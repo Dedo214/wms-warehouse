@@ -357,8 +357,11 @@ class AuditLog(db.Model):
     user = db.relationship("User", back_populates="audit_logs")
     def to_dict(self):
         return {"id":self.id,"user_name":self.user.name if self.user else "نظام",
+                "user_id":self.user_id,
                 "action":self.action,"resource":self.resource,"resource_id":self.resource_id,
-                "description":self.description,"ip_address":self.ip_address,
+                "description":self.description,
+                "old_data":self.old_data,"new_data":self.new_data,
+                "ip_address":self.ip_address,
                 "created_at":self.created_at.isoformat(),
                 "created_date":self.created_at.strftime("%d/%m/%Y %H:%M")}
 

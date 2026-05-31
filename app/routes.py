@@ -10,6 +10,7 @@ from flask_jwt_extended import (
     create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity,
 )
+from werkzeug.utils import secure_filename
 from app.models import (
     db, User, Warehouse, Category,     Supplier, Item,
     Stock, StockMovement, Transfer, InventoryCount,
@@ -31,13 +32,18 @@ from app.services import (
     StockInquiryService,
 )
 from app.utils import ok, created, err, not_found, forbidden, unauthorized, require_role, validate, paginate, gen_ref, parse_date, today_str
+from app.limiter import limiter
 
 api = Blueprint("api", __name__, url_prefix="/api")
+
+MAX_FILE_SIZE = 16 * 1024 * 1024  # 16 MB
+ALLOWED_EXTENSIONS = {"pdf","jpg","jpeg","png","gif","doc","docx","xls","xlsx","csv","txt","zip"}
 
 # ══════════════════════════════════════════════════════════════
 #  AUTH
 # ══════════════════════════════════════════════════════════════
 @api.route("/auth/login", methods=["POST"])
+@limiter.limit("10 per minute")
 def login():
     """
     User login
@@ -70,6 +76,7 @@ def login():
 
 @api.route("/auth/refresh", methods=["POST"])
 @jwt_required(refresh=True)
+@limiter.limit("20 per minute")
 def refresh():
     uid  = int(get_jwt_identity())
     user = User.query.get(uid)
@@ -695,9 +702,38 @@ def read_notification(nid):
 def get_audit_logs():
     page     = int(request.args.get("page",1))
     per_page = int(request.args.get("per_page",50))
-    result   = AuditService.get_logs(page, per_page)
+    filters = {}
+    for k in ["user_id","action","resource","date_from","date_to","search"]:
+        v = request.args.get(k)
+        if v: filters[k] = v
+    result   = AuditService.get_logs(page, per_page, filters)
     return ok({"logs":[l.to_dict() for l in result["items"]],
                "total":result["total"],"pages":result["pages"]})
+
+@api.route("/audit-logs/export", methods=["GET"])
+@require_role("admin","manager")
+def export_audit_logs():
+    import csv
+    fmt = request.args.get("format","csv")
+    filters = {}
+    for k in ["user_id","action","resource","date_from","date_to","search"]:
+        v = request.args.get(k)
+        if v: filters[k] = v
+    result = AuditService.get_logs(1, 99999, filters)
+    logs = [l.to_dict() for l in result["items"]]
+    output = io.StringIO()
+    output.write("\ufeff")
+    w = csv.writer(output)
+    w.writerow(["#","التاريخ","المستخدم","الإجراء","العنصر","الوصف","IP","البيانات القديمة","البيانات الجديدة"])
+    for l in logs:
+        w.writerow([l["id"],l["created_date"],l["user_name"],l["action"],
+                    f"{l['resource']}#{l['resource_id']}" if l['resource_id'] else l['resource'],
+                    l["description"] or "",l["ip_address"] or "",
+                    l["old_data"] or "",l["new_data"] or ""])
+    buf = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    fname = f"audit_logs_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+    return send_file(buf, mimetype="text/csv;charset=utf-8",
+                     download_name=fname, as_attachment=True)
 
 # ══════════════════════════════════════════════════════════════
 #  REPORTS
@@ -920,11 +956,19 @@ def upload_attachment():
         return err("الملف مطلوب")
     f = request.files["file"]
     if not f.filename: return err("اسم الملف مطلوب")
+    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        return err("نوع الملف غير مسموح: يرجى رفع PDF, صور, مستندات Office أو CSV/ZIP فقط")
+    f.seek(0, os.SEEK_END)
+    fsize = f.tell()
+    f.seek(0)
+    if fsize > MAX_FILE_SIZE:
+        return err("حجم الملف يتجاوز 16 ميجابايت")
     ref_type = request.form.get("ref_type", "item")
     ref_id = request.form.get("ref_id", type=int)
     upload_dir = os.path.join(current_app.root_path, "..", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
-    safe_name = f"{ref_type}_{ref_id}_{int(datetime.datetime.utcnow().timestamp())}_{f.filename}"
+    safe_name = f"{ref_type}_{ref_id}_{int(datetime.datetime.utcnow().timestamp())}_{secure_filename(f.filename)}"
     path = os.path.join(upload_dir, safe_name)
     f.save(path)
     size = os.path.getsize(path)
@@ -1093,6 +1137,7 @@ def backup():
 #  REGISTER  — POST /api/auth/register
 # ══════════════════════════════════════════════════════════════
 @api.route("/auth/register", methods=["POST"])
+@limiter.limit("3 per hour")
 def register():
     data = request.get_json() or {}
     errs = validate(data, ["name", "username", "password"])
@@ -1608,8 +1653,15 @@ def upload_file():
     f = request.files.get("file")
     if not f: return err("الملف مطلوب")
     ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        return err("نوع الملف غير مسموح: يرجى رفع PDF, صور, مستندات Office أو CSV/ZIP فقط")
+    f.seek(0, os.SEEK_END)
+    fsize = f.tell()
+    f.seek(0)
+    if fsize > MAX_FILE_SIZE:
+        return err("حجم الملف يتجاوز 16 ميجابايت")
     ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = f"item_{item_id}_{ts}.{ext}" if ext else f"item_{item_id}_{ts}"
+    safe_name = f"item_{item_id}_{ts}_{secure_filename(f.filename)}"
     folder = os.path.join(current_app.root_path, "..", "uploads")
     os.makedirs(folder, exist_ok=True)
     f.save(os.path.join(folder, safe_name))
