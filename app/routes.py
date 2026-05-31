@@ -229,15 +229,57 @@ def delete_item(iid):
     if error: return err(error)
     return ok(message="تم حذف الصنف")
 
-@api.route("/items/<int:iid>/qr", methods=["GET"])
+@api.route("/items/<int:iid>/barcode", methods=["GET"])
 @jwt_required()
-def item_qr(iid):
-    import qrcode as qr_lib
+def item_barcode_img(iid):
     item = Item.query.get_or_404(iid)
-    img  = qr_lib.make(item.barcode or item.code)
-    buf  = io.BytesIO(); img.save(buf,"PNG"); buf.seek(0)
-    return send_file(buf, mimetype="image/png",
-                     download_name=f"{item.code}_qr.png")
+    code = item.barcode or item.code
+    try:
+        import barcode as bc_lib
+        from barcode.writer import ImageWriter
+        code128 = bc_lib.get_barcode_class("code128")
+        bc = code128(code, writer=ImageWriter())
+        buf = io.BytesIO(); bc.write(buf); buf.seek(0)
+        return send_file(buf, mimetype="image/png",
+                         download_name=f"{item.code}_barcode.png")
+    except ImportError:
+        return err("مكتبة barcode غير مثبتة. قم بتشغيل: pip install python-barcode")
+
+@api.route("/items/<int:iid>/barcode/label", methods=["GET"])
+@jwt_required()
+def item_barcode_label(iid):
+    item = Item.query.get_or_404(iid)
+    from reportlab.lib.pagesizes import label as lbl_size
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Image as RLImage, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    import tempfile, os
+    code = item.barcode or item.code
+    tmp = os.path.join(tempfile.gettempdir(), f"bcode_{item.id}.png")
+    try:
+        import barcode as bc_lib
+        from barcode.writer import ImageWriter
+        code128 = bc_lib.get_barcode_class("code128")
+        bc = code128(code, writer=ImageWriter())
+        with open(tmp, "wb") as f: bc.write(f)
+    except ImportError:
+        tmp = None
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=(100*mm, 60*mm),
+                            rightMargin=5*mm, leftMargin=5*mm,
+                            topMargin=5*mm, bottomMargin=5*mm)
+    styles = getSampleStyleSheet()
+    elems = [Paragraph(f"<b>{item.name}</b>", styles["Normal"]),
+             Paragraph(f"الكود: {code} | {item.unit}", styles["Normal"])]
+    if tmp and os.path.isfile(tmp):
+        elems.append(Spacer(1, 3*mm))
+        elems.append(RLImage(tmp, width=60*mm, height=20*mm))
+    doc.build(elems); buf.seek(0)
+    if tmp and os.path.isfile(tmp):
+        try: os.remove(tmp)
+        except: pass
+    return send_file(buf, mimetype="application/pdf",
+                     download_name=f"{item.code}_label.pdf")
 
 # ══════════════════════════════════════════════════════════════
 #  STOCK MOVEMENTS
@@ -1664,7 +1706,8 @@ def create_po():
     ref = gen_ref("PO")
     po = PurchaseOrder(ref_number=ref, supplier_id=data.get("supplier_id"),
         warehouse_id=data.get("warehouse_id"), currency=data.get("currency","SAR"),
-        payment_terms=data.get("payment_terms",""), notes=data.get("notes",""), status="draft")
+        payment_terms=data.get("payment_terms",""), notes=data.get("notes",""),
+        created_by=g.current_user.id, status="draft")
     if "quotation_id" in data: po.quotation_id = int(data["quotation_id"])
     if "project_id" in data: po.project_id = int(data["project_id"])
     if "order_date" in data: po.order_date = parse_date(data["order_date"])
@@ -1709,6 +1752,10 @@ def approve_po(pid):
     po = PurchaseOrder.query.get_or_404(pid)
     if po.status != "draft": return err("يمكن اعتماد المسودات فقط")
     po.status = "approved"
+    level = (request.get_json() or {}).get("level", 1)
+    Appr = ApprovalLog(resource_type="po", resource_id=po.id,
+           reviewer_id=g.current_user.id, decision="approved", level=level)
+    db.session.add(Appr)
     AuditService.log("approve","purchase_order",pid,f"اعتماد أمر شراء: {po.ref_number}")
     db.session.commit()
     return ok(po.to_dict())
@@ -1737,6 +1784,7 @@ def cancel_po(pid):
 @require_role("admin")
 def delete_po(pid):
     po = PurchaseOrder.query.get_or_404(pid)
+    if po.status in ("sent","partial","completed"): return err("لا يمكن حذف أمر شراء مرسل أو مكتمل")
     db.session.delete(po)
     AuditService.log("delete","purchase_order",pid,f"حذف أمر شراء")
     db.session.commit()
@@ -1811,6 +1859,22 @@ def get_grn(gid):
     grn = GoodsReceipt.query.get_or_404(gid)
     return ok(grn.to_dict())
 
+@api.route("/procurement/grn/<int:gid>/cancel", methods=["POST"])
+@require_role("admin")
+def cancel_grn(gid):
+    grn = GoodsReceipt.query.get_or_404(gid)
+    for it in grn.items:
+        if it.item_id and grn.warehouse_id:
+            stk = Stock.query.filter_by(item_id=it.item_id, warehouse_id=grn.warehouse_id).first()
+            if stk: stk.quantity = max(0, stk.quantity - (it.accepted_qty or 0))
+    if grn.po:
+        for poi in grn.po.items:
+            poi.received_qty = max(0, (poi.received_qty or 0) - sum(gi.quantity for gi in grn.items if gi.po_item_id == poi.id))
+    AuditService.log("cancel","goods_receipt",gid,f"إلغاء إذن استلام: {grn.ref_number}")
+    db.session.delete(grn)
+    db.session.commit()
+    return ok(message="تم إلغاء إذن الاستلام")
+
 # ══════════════════════════════════════════════════════════════
 #  PROCUREMENT — PURCHASE RETURNS
 # ══════════════════════════════════════════════════════════════
@@ -1836,10 +1900,6 @@ def create_preturn():
         db.session.add(PReturnItem(return_id=pr.id, item_id=it.get("item_id"),
             item_name=it.get("item_name",""), quantity=qty, unit_price=up,
             total=round(qty*up,2), reason_detail=it.get("reason_detail","")))
-        # deduct from stock
-        if it.get("item_id") and pr.warehouse_id:
-            stk = Stock.query.filter_by(item_id=int(it["item_id"]), warehouse_id=pr.warehouse_id).first()
-            if stk: stk.quantity = max(0, stk.quantity - qty)
     AuditService.log("create","purchase_return",pr.id,f"إنشاء مرتجع: {ref}")
     db.session.commit()
     return created(pr.to_dict())
@@ -1854,8 +1914,23 @@ def get_preturn(rid):
 @require_role("admin","manager")
 def approve_preturn(rid):
     pr = PurchaseReturn.query.get_or_404(rid)
+    if pr.status != "pending": return err("يمكن اعتماد المعلقات فقط")
     pr.status = "returned"
+    for it in pr.items:
+        if it.item_id and pr.warehouse_id:
+            stk = Stock.query.filter_by(item_id=it.item_id, warehouse_id=pr.warehouse_id).first()
+            if stk: stk.quantity = max(0, stk.quantity - it.quantity)
     AuditService.log("approve","purchase_return",rid,f"اعتماد مرتجع: {pr.ref_number}")
+    db.session.commit()
+    return ok(pr.to_dict())
+
+@api.route("/procurement/returns/<int:rid>/reject", methods=["POST"])
+@require_role("admin","manager")
+def reject_preturn(rid):
+    pr = PurchaseReturn.query.get_or_404(rid)
+    if pr.status != "pending": return err("يمكن رفض المعلقات فقط")
+    pr.status = "cancelled"
+    AuditService.log("reject","purchase_return",rid,f"رفض مرتجع: {pr.ref_number}")
     db.session.commit()
     return ok(pr.to_dict())
 

@@ -23,10 +23,12 @@ class User(db.Model):
     movements  = db.relationship("StockMovement", back_populates="user", lazy="dynamic")
     audit_logs = db.relationship("AuditLog", back_populates="user", lazy="dynamic")
     ROLE_PERMISSIONS = {
-        "admin":   ["view","create","update","delete","approve","export","manage_users"],
-        "manager": ["view","create","update","approve","export"],
-        "keeper":  ["view","create"],
-        "viewer":  ["view"],
+        "super_admin": ["view","create","update","delete","approve","export","manage_users","manage_system"],
+        "admin":       ["view","create","update","delete","approve","export","manage_users"],
+        "manager":     ["view","create","update","approve","export"],
+        "purchasing":  ["view","create","update","approve","export"],
+        "keeper":      ["view","create"],
+        "viewer":      ["view"],
     }
     def set_password(self, raw): self.password_hash = generate_password_hash(raw)
     def check_password(self, raw): return check_password_hash(self.password_hash, raw)
@@ -34,7 +36,7 @@ class User(db.Model):
     def has_permission(self, p): return p in self.get_permissions()
     def can_approve(self): return self.role in ("admin","manager")
     def to_dict(self):
-        rl = {"admin":"مدير عام","manager":"مشرف","keeper":"أمين مخزن","viewer":"قارئ"}
+        rl = {"super_admin":"مدير النظام","admin":"مدير عام","manager":"مشرف","purchasing":"مشتريات","keeper":"أمين مخزن","viewer":"قارئ"}
         return {"id":self.id,"name":self.name,"username":self.username,"email":self.email,
                 "role":self.role,"role_label":rl.get(self.role,self.role),
                 "warehouse_id":self.warehouse_id,
@@ -631,6 +633,7 @@ class PurchaseOrder(db.Model):
     supplier_id   = db.Column(db.Integer, db.ForeignKey("suppliers.id"))
     project_id    = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=True)
     warehouse_id  = db.Column(db.Integer, db.ForeignKey("warehouses.id"))
+    created_by    = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     total_amount  = db.Column(db.Float, default=0.0)
     order_date    = db.Column(db.Date)
     delivery_date = db.Column(db.Date, nullable=True)
@@ -643,9 +646,10 @@ class PurchaseOrder(db.Model):
     supplier  = db.relationship("Supplier", foreign_keys=[supplier_id])
     project   = db.relationship("Project", foreign_keys=[project_id])
     warehouse = db.relationship("Warehouse", foreign_keys=[warehouse_id])
+    creator   = db.relationship("User", foreign_keys=[created_by])
     items     = db.relationship("POItem", back_populates="po", cascade="all,delete-orphan")
     receipts  = db.relationship("GoodsReceipt", back_populates="po", cascade="all,delete-orphan")
-    STATUS_LABELS = {"draft":"مسودة","sent":"مرسل","partial":"استلام جزئي","completed":"مكتمل","cancelled":"ملغي"}
+    STATUS_LABELS = {"draft":"مسودة","approved":"معتمد","sent":"مرسل","partial":"استلام جزئي","completed":"مكتمل","cancelled":"ملغي"}
     def to_dict(self):
         items_total = sum((i.total or 0) for i in self.items)
         return {"id":self.id,"ref_number":self.ref_number,
@@ -657,6 +661,8 @@ class PurchaseOrder(db.Model):
                 "project_name":self.project.name if self.project else "",
                 "warehouse_id":self.warehouse_id,
                 "warehouse_name":self.warehouse.name if self.warehouse else "",
+                "created_by":self.created_by,
+                "creator_name":self.creator.name if self.creator else "",
                 "total_amount":self.total_amount or items_total,
                 "order_date":self.order_date.isoformat() if self.order_date else "",
                 "delivery_date":self.delivery_date.isoformat() if self.delivery_date else "",

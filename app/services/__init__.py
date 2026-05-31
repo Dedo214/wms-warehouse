@@ -178,6 +178,15 @@ class DashboardService:
         pending  = Transfer.query.filter_by(status="pending").count()
         unread   = Notification.query.filter_by(user_id=user_id, is_read=False).count()
 
+        pending_prs = PurchaseRequest.query.filter_by(status="pending").count()
+        pending_pos = PurchaseOrder.query.filter_by(status="draft").count()
+        sent_pos    = PurchaseOrder.query.filter_by(status="sent").count()
+        pending_grns = GoodsReceipt.query.count()
+        month_start = today.replace(day=1)
+        month_pos   = PurchaseOrder.query.filter(PurchaseOrder.created_at >= month_start).count()
+        month_po_value = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
+            PurchaseOrder.created_at >= month_start).scalar() or 0
+
         return {
             "kpis": {
                 "total_items":       len(items),
@@ -188,6 +197,11 @@ class DashboardService:
                 "today_in":          sum(m.quantity for m in today_movs if m.type=="in"),
                 "today_out":         sum(m.quantity for m in today_movs if m.type=="out"),
                 "total_movements":   StockMovement.query.count(),
+                "pending_prs":       pending_prs,
+                "pending_pos":       pending_pos,
+                "sent_pos":          sent_pos,
+                "month_pos":         month_pos,
+                "month_po_value":    round(month_po_value, 2),
             },
             "warehouses":           wh_stats,
             "critical_items":       critical_items,
