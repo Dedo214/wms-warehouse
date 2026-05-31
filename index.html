@@ -19,6 +19,19 @@
   --txt:#1A202C;--mut:#6B7280;--mut2:#9CA3AF;
   --sw:222px;--th:54px;--rad:8px;--radl:12px;--shd:0 1px 4px rgba(0,0,0,.08);
 }
+:root.dark{
+  --pr:#2980B9;--prl:#5DADE2;--prll:#1a2a3a;
+  --g:#27AE60;--gl:#2ECC71;--gll:#1a3020;
+  --a:#F39C12;--al:#F1C40F;--all:#2a2210;
+  --r:#E74C3C;--rl:#EC7063;--rll:#2a1515;
+  --pu:#8E44AD;--pul:#1a1520;
+  --bg:#0f1419;--card:#1a2332;--bdr:#2a3548;
+  --txt:#E8EDF2;--mut:#8899AA;--mut2:#5a6a7a;
+  --shd:0 1px 4px rgba(0,0,0,.3);
+}
+</style>
+<script>if(localStorage.getItem('wh_dark')==='true'||JSON.parse(localStorage.getItem('wh_settings')||'{}').dark)document.documentElement.classList.add('dark');</script>
+<style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14px;line-height:1.5}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}
@@ -102,7 +115,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 .ldg{text-align:center;padding:24px;color:var(--mut)}.sp2{display:block;width:22px;height:22px;border:3px solid var(--bdr);border-top-color:var(--prl);border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 8px}
 .div{height:1px;background:var(--bdr);margin:12px 0}.pgb{display:flex;gap:4px;flex-wrap:wrap}
 @media(max-width:900px){.s4{grid-template-columns:repeat(2,1fr)}.s3{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:768px){.sb{width:52px}.main{margin-right:52px}.fr2,.fr3{grid-template-columns:1fr}.content{padding:12px 10px}.tb{padding:0 10px}}
+@media(max-width:768px){.sb{width:52px}.main{margin-right:52px}.fr2,.fr3{grid-template-columns:1fr}.content{padding:12px 10px}.tb{padding:0 10px}.mlg{max-width:100%;margin:0 4px}.modal{max-width:100%}.tb h1{font-size:13px}.uc{font-size:11px;padding:2px 6px}.uc span:not(.av){display:none}.tw{overflow-x:auto}.tc{bottom:10px;left:10px;right:10px}.toast{min-width:auto;max-width:100%}.ov{padding:6px}.mh{padding:14px 14px 0}.mb{padding:12px 14px}.mf{padding:0 14px 12px}}
 @media(max-width:480px){.s4,.s3,.s2{grid-template-columns:1fr}}
 @media print{.sb,.tb,.btn,.mf{display:none!important}.main{margin-right:0}.content{padding:0}}
 </style>
@@ -133,7 +146,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div id="rep-con" style="display:none">
     <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
       <span style="font-size:13px;color:var(--mut)">تقرير الاستهلاك — الأصناف الأكثر استهلاكاً</span>
-      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('consumption')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','consumption')">📄 CSV</button></div>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('consumption')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','consumption')">📄 CSV</button><button class="btn bo bsm" onclick="expFile('pdf','consumption')">🖨️ PDF</button></div>
     </div>
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
       <span style="font-size:12px;color:var(--mut)">آخر</span>
@@ -153,7 +166,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div id="rep-fs" style="display:none">
     <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
       <span style="font-size:13px;color:var(--mut)">تحليل سرعة الحركة — الأسرع والأبطأ</span>
-      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('fastslow')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','fastslow')">📄 CSV</button></div>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('fastslow')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','fastslow')">📄 CSV</button><button class="btn bo bsm" onclick="expFile('pdf','fastslow')">🖨️ PDF</button></div>
     </div>
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
       <span style="font-size:12px;color:var(--mut)">آخر</span>
@@ -174,7 +187,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div id="rep-sp" style="display:none">
     <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
       <span style="font-size:13px;color:var(--mut)">تقرير أداء الموردين</span>
-      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('supplier_perf')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','supplier_perf')">📄 CSV</button></div>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('supplier_perf')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','supplier_perf')">📄 CSV</button><button class="btn bo bsm" onclick="expFile('pdf','supplier_perf')">🖨️ PDF</button></div>
     </div>
     <div class="sg s4" id="spkpis" style="margin-bottom:12px"></div>
     <div class="card"><div class="tw tscr"><table><thead><tr><th>المورد</th><th>التصنيف</th><th>عدد أوامر الشراء</th><th>الإجمالي</th><th>عدد الإستلامات</th><th>تقييم التسليم</th><th>تقييم الجودة</th><th>المعدل</th></tr></thead><tbody id="spbd"></tbody></table></div></div>
@@ -236,6 +249,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <div class="sw2" id="gsw" style="display:none"><input type="text" id="gsi" placeholder="بحث سريع..." style="width:180px" oninput="gSearch(this.value)"><span class="swi">🔍</span></div>
       <button class="bico" onclick="toggleGS()">🔍</button>
       <button class="nbb" onclick="openM('notifs');loadNotifs()">🔔<span class="nbd" id="nbd"></span></button>
+      <button class="bico" id="dmBtn" onclick="toggleDark()" title="الوضع الليلي">🌙</button>
       <button class="btn bp bsm" onclick="openM('mov')">+ حركة</button>
       <div class="uc"><div class="av" id="tav">أح</div><span id="tnm">أحمد</span><span class="bdg b-i" id="trl" style="font-size:10px">مدير</span></div>
     </div>
@@ -487,6 +501,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
           <div style="display:flex;flex-direction:column;gap:7px;margin-top:4px">
             <label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="chkLow" checked style="width:auto"> تنبيه عند الوصول للحد الأدنى</label>
             <label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="chkTr" checked style="width:auto"> تنبيه عند طلب تحويل جديد</label>
+            <label style="display:flex;align-items:center;gap:7px;font-size:13px"><input type="checkbox" id="chkDark" style="width:auto"> 🌙 الوضع الليلي</label>
           </div>
         </div>
         <button class="btn bp" data-act="saveSettings">💾 حفظ الإعدادات</button>
@@ -1551,12 +1566,27 @@ async function subUser(){
 // ══════════════════════════════════════════════
 //  SETTINGS
 // ══════════════════════════════════════════════
+function toggleDark(){
+  const html=document.documentElement;
+  html.classList.toggle('dark');
+  document.getElementById('dmBtn').textContent=html.classList.contains('dark')?'☀️':'🌙';
+  localStorage.setItem('wh_dark',html.classList.contains('dark'));
+}
+function applyDark(state){
+  const html=document.documentElement;
+  if(state){html.classList.add('dark');}else{html.classList.remove('dark');}
+  const btn=document.getElementById('dmBtn');
+  if(btn)btn.textContent=state?'☀️':'🌙';
+  const cb=document.getElementById('chkDark');
+  if(cb)cb.checked=state;
+}
 function saveSettings(){
-  const d={company:document.getElementById('sco').value,currency:document.getElementById('curSel').value,notify_low:document.getElementById('chkLow').checked,notify_transfer:document.getElementById('chkTr').checked};
+  const d={company:document.getElementById('sco').value,currency:document.getElementById('curSel').value,notify_low:document.getElementById('chkLow').checked,notify_transfer:document.getElementById('chkTr').checked,dark:document.getElementById('chkDark').checked};
   localStorage.setItem('wh_settings',JSON.stringify(d));
   document.title='نظام إدارة المخازن - '+d.company;
   const sb=document.querySelector('.sbl-t h2');
   if(sb) sb.textContent=d.company;
+  applyDark(d.dark);
   toast('تم حفظ الإعدادات ✅','s');
 }
 function loadSettings(){
@@ -1573,6 +1603,7 @@ function loadSettings(){
     if(d.currency)document.getElementById('curSel').value=d.currency;
     if(d.notify_low!==undefined)document.getElementById('chkLow').checked=d.notify_low;
     if(d.notify_transfer!==undefined)document.getElementById('chkTr').checked=d.notify_transfer;
+    if(d.dark!==undefined)applyDark(d.dark);
   }catch(e){}
 }
 function loadWhMgmt(){

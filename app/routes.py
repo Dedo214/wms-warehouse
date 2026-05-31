@@ -1134,6 +1134,73 @@ def export_csv():
             writer.writerow([p["name"],p["code"],p["client"],
                             p["budget"],p["spent"],p["remaining"],
                             f"{p['usage_pct']}%",p["status_label"]])
+    elif rtype == "consumption":
+        days = int(request.args.get("days",30))
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        limit = int(request.args.get("limit",50))
+        writer.writerow(["الصنف","الكود","الكمية المستهلكة","القيمة","عدد الحركات","متوسط اليوم"])
+        rows = db.session.query(
+            StockMovement.item_id, Item.name, Item.code,
+            func.sum(StockMovement.quantity).label("total_qty"),
+            func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
+            func.count(StockMovement.id).label("mov_count")
+        ).join(Item, StockMovement.item_id == Item.id
+        ).filter(StockMovement.type.in_(["out","transfer","damage"]),
+                 StockMovement.created_at >= since
+        ).group_by(StockMovement.item_id
+        ).order_by(func.sum(StockMovement.quantity).desc()
+        ).limit(limit).all()
+        for r in rows:
+            writer.writerow([r[1],r[2],r[3],round(float(r[4] or 0),2),r[5],round(float(r[3])/max(days,1),2)])
+    elif rtype == "fastslow":
+        days = int(request.args.get("days",90))
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        limit = int(request.args.get("limit",50))
+        out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
+            StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
+        ).group_by(StockMovement.item_id).subquery()
+        items = db.session.query(Item.id, Item.name, Item.code, Item.unit,
+                                 func.coalesce(out_q.c.qty, 0).label("consumed"),
+                                 func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
+        ).outerjoin(out_q, Item.id == out_q.c.item_id
+        ).outerjoin(Stock, Stock.item_id == Item.id
+        ).group_by(Item.id).all()
+        writer.writerow(["النوع","الصنف","الكمية المستهلكة","المخزون الحالي"])
+        fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
+        slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
+        for i in fast:
+            writer.writerow(["سريع الحركة",i[1],i[4],i[5]])
+        for i in slow:
+            writer.writerow(["بطيء الحركة",i[1],i[4],i[5]])
+    elif rtype == "supplier_perf":
+        writer.writerow(["المورد","أوامر الشراء","الإجمالي","الإستلامات","دقة التسليم","الجودة","المعدل"])
+        sp_rows = db.session.query(
+            Supplier.id, Supplier.name,
+            func.count(PurchaseOrder.id).label("po_count"),
+            func.sum(PurchaseOrder.total_amount).label("total_amount"),
+            func.count(GoodsReceipt.id).label("grn_count"),
+        ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
+        ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
+        ).group_by(Supplier.id).all()
+        evals = SupplierEvaluation.query.with_entities(
+            SupplierEvaluation.supplier_id,
+            func.avg(SupplierEvaluation.quality).label("avg_quality"),
+            func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
+        ).group_by(SupplierEvaluation.supplier_id).all()
+        eval_map = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1)} for e in evals}
+        for r in sp_rows:
+            ev = eval_map.get(r[0],{})
+            avg = (ev.get("delivery",0) + ev.get("quality",0))/2
+            writer.writerow([r[1] or "", r[2] or 0, round(float(r[3] or 0),2),
+                           r[4] or 0, ev.get("delivery",0), ev.get("quality",0), round(avg,1)])
+    elif rtype == "valuation":
+        writer.writerow(["الصنف","الكود","الكمية الإجمالية","متوسط التكلفة","القيمة الإجمالية","عدد الطبقات"])
+        for it in Item.query.filter_by(is_active=True).order_by(Item.name).all():
+            v = InventoryLayer.get_valuation(it.id)
+            if v["total_qty"] > 0:
+                writer.writerow([it.name, it.code, v["total_qty"],
+                               round(v["avg_cost"],2) if v["avg_cost"] else 0,
+                               round(v["total_value"],2), v["layer_count"]])
     else:
         return err("نوع تقرير غير معروف")
 
@@ -1333,6 +1400,121 @@ def export_pdf():
             f"Total Budget: {s['total_budget']:,.0f} SAR | "
             f"Total Spent: {s['total_spent']:,.0f} SAR | "
             f"Remaining: {s['total_remaining']:,.0f} SAR", f_style))
+
+    elif rtype == "consumption":
+        days = int(request.args.get("days",30))
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        limit = int(request.args.get("limit",50))
+        headers = ["Item","Code","Qty Consumed","Value","Movements","Avg/Day"]
+        data = []
+        rows = db.session.query(
+            StockMovement.item_id, Item.name, Item.code,
+            func.sum(StockMovement.quantity).label("total_qty"),
+            func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
+            func.count(StockMovement.id).label("mov_count")
+        ).join(Item, StockMovement.item_id == Item.id
+        ).filter(StockMovement.type.in_(["out","transfer","damage"]),
+                 StockMovement.created_at >= since
+        ).group_by(StockMovement.item_id
+        ).order_by(func.sum(StockMovement.quantity).desc()
+        ).limit(limit).all()
+        for r in rows:
+            data.append([r[1][:22], r[2], str(int(r[3])),
+                        f"{round(float(r[4] or 0),2):,.2f}",
+                        str(r[5]), f"{round(float(r[3])/max(days,1),2):,.2f}"])
+        col_w = [4.5*cm, 2.5*cm, 2.5*cm, 3*cm, 2.5*cm, 2.5*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                 rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                 topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"Consumption Report ({days}d) — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+        elements.append(Spacer(1,0.3*cm))
+        total_q = sum(float(r[3]) for r in rows) if rows else 0
+        elements.append(Paragraph(f"Total Items: {len(data)} | Total Consumed: {int(total_q)} units", f_style))
+
+    elif rtype == "fastslow":
+        days = int(request.args.get("days",90))
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        limit = int(request.args.get("limit",50))
+        headers = ["Type","Item","Consumed","Current Stock"]
+        data = []
+        out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
+            StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
+        ).group_by(StockMovement.item_id).subquery()
+        items = db.session.query(Item.id, Item.name, Item.code,
+                                 func.coalesce(out_q.c.qty, 0).label("consumed"),
+                                 func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
+        ).outerjoin(out_q, Item.id == out_q.c.item_id
+        ).outerjoin(Stock, Stock.item_id == Item.id
+        ).group_by(Item.id).all()
+        fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
+        slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
+        for i in fast:
+            data.append(["Fast", i[2], str(int(i[3])), str(int(i[4]))])
+        data.append(["—","—","—","—"])
+        for i in slow:
+            data.append(["Slow", i[2], str(int(i[3])), str(int(i[4]))])
+        col_w = [2*cm, 4.5*cm, 3*cm, 3*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                 rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                 topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"Fast/Slow Moving Items ({days}d) — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+
+    elif rtype == "supplier_perf":
+        headers = ["Supplier","PO Count","Total Amount","GRN Count","Delivery","Quality","Avg Rating"]
+        data = []
+        sp_rows = db.session.query(
+            Supplier.id, Supplier.name,
+            func.count(PurchaseOrder.id).label("po_count"),
+            func.sum(PurchaseOrder.total_amount).label("total_amount"),
+            func.count(GoodsReceipt.id).label("grn_count"),
+        ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
+        ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
+        ).group_by(Supplier.id).all()
+        sp_evals = SupplierEvaluation.query.with_entities(
+            SupplierEvaluation.supplier_id,
+            func.avg(SupplierEvaluation.quality).label("avg_quality"),
+            func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
+        ).group_by(SupplierEvaluation.supplier_id).all()
+        sp_emap = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1)} for e in sp_evals}
+        for r in sp_rows:
+            ev = sp_emap.get(r[0],{})
+            avg = (ev.get("delivery",0) + ev.get("quality",0))/2
+            data.append([(r[1] or "")[:20], str(r[2] or 0),
+                        f"{round(float(r[3] or 0),2):,.2f}", str(r[4] or 0),
+                        str(ev.get("delivery",0)), str(ev.get("quality",0)),
+                        f"{round(avg,1)}"])
+        col_w = [4*cm, 2.5*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                 rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                 topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"Supplier Performance Report — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+
+    elif rtype == "valuation":
+        headers = ["Item","Code","Total Qty","Avg Cost","Total Value","Layers"]
+        data = []
+        for it in Item.query.filter_by(is_active=True).order_by(Item.name).all():
+            v = InventoryLayer.get_valuation(it.id)
+            if v["total_qty"] > 0:
+                data.append([it.name[:22], it.code, str(v["total_qty"]),
+                           f"{round(v['avg_cost'],2):,.2f}" if v['avg_cost'] else "0",
+                           f"{round(v['total_value'],2):,.2f}", str(v["layer_count"])])
+        col_w = [4.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3*cm, 2*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                 rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                 topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"FIFO Inventory Valuation — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+        grand_v = sum(v["total_value"] for v in [InventoryLayer.get_valuation(it.id) for it in Item.query.filter_by(is_active=True).all()] if v["total_qty"] > 0)
+        elements.append(Spacer(1,0.3*cm))
+        elements.append(Paragraph(f"Total Items: {len(data)} | Grand Total Value: {grand_v:,.2f} SAR", f_style))
+
     else:
         return err("نوع تقرير غير معروف")
 
