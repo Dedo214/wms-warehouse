@@ -2,7 +2,8 @@
 import datetime
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import func
+from sqlalchemy import func, CheckConstraint
+from sqlalchemy.orm import validates
 
 db = SQLAlchemy()
 
@@ -157,7 +158,8 @@ class Stock(db.Model):
     quantity     = db.Column(db.Float, default=0.0)
     item      = db.relationship("Item", back_populates="stocks")
     warehouse = db.relationship("Warehouse", back_populates="stocks")
-    __table_args__ = (db.UniqueConstraint("item_id","warehouse_id"),)
+    __table_args__ = (db.UniqueConstraint("item_id","warehouse_id"),
+                      db.CheckConstraint("quantity >= 0", name="ck_stock_quantity_non_negative"),)
     @classmethod
     def get_or_create(cls, item_id, warehouse_id):
         obj = cls.query.filter_by(item_id=item_id, warehouse_id=warehouse_id).first()
@@ -165,6 +167,12 @@ class Stock(db.Model):
             obj = cls(item_id=item_id, warehouse_id=warehouse_id, quantity=0.0)
             db.session.add(obj)
         return obj
+
+    @validates("quantity")
+    def validate_quantity(self, key, value):
+        if value is not None and value < 0:
+            raise ValueError("الكمية لا يمكن أن تكون سالبة")
+        return value
 
 class StockMovement(db.Model):
     __tablename__ = "stock_movements"

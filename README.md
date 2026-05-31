@@ -1,5 +1,5 @@
 ---
-title: WMS Warehouse System
+title: المخزن النوبلى - Alnubala Warehouse
 emoji: 🏭
 colorFrom: blue
 colorTo: green

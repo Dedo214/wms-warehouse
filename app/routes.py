@@ -637,6 +637,150 @@ def export_excel():
     )
 
 # ══════════════════════════════════════════════════════════════
+#  PROCUREMENT EXPORTS
+# ══════════════════════════════════════════════════════════════
+@api.route("/procurement/export/<fmt>", methods=["GET"])
+@jwt_required()
+def procurement_export(fmt):
+    from io import StringIO
+    import csv
+    rtype = request.args.get("type","pr")
+    data = []
+    headers = []
+    fname_base = rtype
+    if rtype == "pr":
+        headers = ["رقم المرجع","التاريخ","الطالب","القسم","الأولوية","الحالة"]
+        data = [[p.ref_number, str(p.created_at)[:10], p.requester.name if p.requester else "", p.department, p.priority, p.status] for p in PurchaseRequest.query.order_by(PurchaseRequest.created_at.desc()).all()]
+    elif rtype == "rfq":
+        headers = ["رقم المرجع","التاريخ","الحالة","عدد الموردين","عدد العروض"]
+        data = [[r.ref_number, str(r.created_at)[:10], r.status, len(r.suppliers), len(r.quotations)] for r in RFQ.query.order_by(RFQ.created_at.desc()).all()]
+    elif rtype == "po":
+        headers = ["رقم المرجع","التاريخ","المورد","المستودع","الحالة","الإجمالي"]
+        data = [[p.ref_number, str(p.created_at)[:10], p.supplier.name if p.supplier else "", p.warehouse.name if p.warehouse else "", p.status, p.total_amount] for p in PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()]
+    elif rtype == "returns":
+        headers = ["رقم المرجع","التاريخ","المورد","السبب","الحالة"]
+        data = [[r.ref_number, str(r.created_at)[:10], r.supplier.name if r.supplier else "", r.reason, r.status] for r in PurchaseReturn.query.order_by(PurchaseReturn.created_at.desc()).all()]
+    elif rtype == "grn":
+        headers = ["رقم المرجع","التاريخ","المورد","أمر الشراء","الملاحظات"]
+        data = [[g.ref_number, str(g.created_at)[:10], g.supplier.name if g.supplier else "", g.po.ref_number if g.po else "", g.notes or ""] for g in GoodsReceipt.query.order_by(GoodsReceipt.created_at.desc()).all()]
+    else:
+        return not_found("نوع التقرير غير معروف")
+    if fmt == "xlsx":
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = fname_base
+        ws.append(headers)
+        for row in data: ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf); buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name=f"procurement_{fname_base}.xlsx", as_attachment=True)
+    elif fmt == "csv":
+        buf = StringIO()
+        w = csv.writer(buf); w.writerow(headers); w.writerows(data)
+        b = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
+        return send_file(b, mimetype="text/csv", download_name=f"procurement_{fname_base}.csv", as_attachment=True)
+    elif fmt == "pdf":
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.enums import TA_CENTER
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=1.5*cm)
+        styles = getSampleStyleSheet()
+        t_style = styles["Title"]
+        elements = [Paragraph(f"تقرير المشتريات - {rtype}", t_style), Spacer(1, 0.5*cm)]
+        col_w = [6*cm] + [4*cm]*(len(headers)-1) if len(headers) > 1 else [6*cm]
+        tbl = Table([headers] + data, colWidths=col_w, repeatRows=1)
+        ts = TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1B4F72")),
+            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+            ("FONTSIZE",(0,0),(-1,0),9),
+            ("FONTSIZE",(0,1),(-1,-1),8),
+            ("ALIGN",(0,0),(-1,-1),"CENTER"),
+            ("GRID",(0,0),(-1,-1),0.4,colors.HexColor("#BDC3C7")),
+            ("TOPPADDING",(0,0),(-1,-1),4),
+            ("BOTTOMPADDING",(0,0),(-1,-1),4),
+        ])
+        tbl.setStyle(ts)
+        elements.append(tbl)
+        doc.build(elements); buf.seek(0)
+        return send_file(buf, mimetype="application/pdf", download_name=f"procurement_{fname_base}.pdf", as_attachment=True)
+    return not_found("نوع الملف غير معروف")
+
+# ══════════════════════════════════════════════════════════════
+#  GENERATE PO FROM QUOTATION
+# ══════════════════════════════════════════════════════════════
+@api.route("/procurement/quotations/<int:qid>/po", methods=["POST"])
+@require_role("admin","manager")
+def generate_po_from_quotation(qid):
+    qt = Quotation.query.get_or_404(qid)
+    if qt.status != "accepted": return err("يجب قبول عرض السعر أولاً")
+    po = PurchaseOrder(ref_number=gen_ref("PO"), quotation_id=qt.id,
+        supplier_id=qt.supplier_id, rfq_id=qt.rfq_id,
+        warehouse_id=None,
+        created_by=g.current_user.id, status="draft",
+        notes=qt.notes, total_amount=qt.total)
+    db.session.add(po); db.session.flush()
+    for qi in qt.items:
+        db.session.add(POItem(po_id=po.id, item_name=qi.item_name,
+            quantity=qi.quantity, unit_price=qi.unit_price,
+            total=qi.total, description=qi.description))
+    AuditService.log("create","purchase_order",po.id,f"إنشاء أمر شراء من عرض سعر: {po.ref_number}")
+    db.session.commit()
+    return created(po.to_dict(), "تم إنشاء أمر الشراء من عرض السعر")
+
+# ══════════════════════════════════════════════════════════════
+#  MISSING DETAIL ENDPOINTS
+# ══════════════════════════════════════════════════════════════
+@api.route("/warehouses/<int:wid>", methods=["GET"])
+@jwt_required()
+def get_warehouse(wid):
+    return ok(Warehouse.query.get_or_404(wid).to_dict())
+
+@api.route("/suppliers/<int:sid>", methods=["GET"])
+@jwt_required()
+def get_supplier(sid):
+    return ok(Supplier.query.get_or_404(sid).to_dict())
+
+@api.route("/users/<int:uid>", methods=["GET"])
+@require_role("admin","manager")
+def get_user(uid):
+    return ok(User.query.get_or_404(uid).to_dict())
+
+@api.route("/transfers/<int:tid>", methods=["GET"])
+@jwt_required()
+def get_transfer(tid):
+    return ok(Transfer.query.get_or_404(tid).to_dict())
+
+@api.route("/procurement/evaluations/<int:eid>", methods=["GET"])
+@jwt_required()
+def get_evaluation(eid):
+    return ok(SupplierEvaluation.query.get_or_404(eid).to_dict())
+
+@api.route("/procurement/grn/<int:gid>", methods=["PUT"])
+@require_role("admin","manager")
+def update_grn(gid):
+    grn = GoodsReceipt.query.get_or_404(gid)
+    data = request.get_json() or {}
+    for k in ("notes",): setattr(grn, k, data.get(k, getattr(grn, k)))
+    AuditService.log("update","goods_receipt",gid,f"تحديث إذن استلام")
+    db.session.commit()
+    return ok(grn.to_dict())
+
+@api.route("/procurement/returns/<int:rid>", methods=["PUT"])
+@require_role("admin","manager")
+def update_return(rid):
+    pr = PurchaseReturn.query.get_or_404(rid)
+    data = request.get_json() or {}
+    for k in ("notes","reason"): setattr(pr, k, data.get(k, getattr(pr, k)))
+    AuditService.log("update","purchase_return",rid,f"تحديث مرتجع")
+    db.session.commit()
+    return ok(pr.to_dict())
+
+# ══════════════════════════════════════════════════════════════
 #  BACKUP
 # ══════════════════════════════════════════════════════════════
 @api.route("/backup", methods=["GET"])
@@ -814,7 +958,7 @@ def export_pdf():
 
     def make_table(data, headers, col_widths):
         tbl = Table([headers] + data, colWidths=col_widths, repeatRows=1)
-        ts = TableStyle([
+        cmds = [
             ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1B4F72")),
             ("TEXTCOLOR", (0,0),(-1,0),colors.white),
             ("FONTSIZE",  (0,0),(-1,0),8),
@@ -825,9 +969,9 @@ def export_pdf():
             ("GRID",      (0,0),(-1,-1),0.4,colors.HexColor("#BDC3C7")),
             ("TOPPADDING",(0,0),(-1,-1),3),
             ("BOTTOMPADDING",(0,0),(-1,-1),3),
-        ])
-        tbl.setStyle(ts)
-        return tbl
+        ]
+        tbl.setStyle(TableStyle(cmds))
+        return tbl, cmds
 
     if rtype == "balance":
         whs   = Warehouse.query.filter_by(is_active=True).all()
@@ -856,12 +1000,12 @@ def export_pdf():
                                  topMargin=2*cm, bottomMargin=1.5*cm)
         elements.append(Paragraph(f"Warehouse Balance Report — {now_str}", t_style))
         elements.append(Spacer(1, 0.3*cm))
-        tbl = make_table(data, headers, col_w)
+        tbl, base_cmds = make_table(data, headers, col_w)
         status_col = len(headers) - 1
         for i, st in enumerate([it.get_status() for it in items], 1):
             tbl._argW[status_col] = 2*cm
-            ts = tbl.getStyle()
-            ts.add("BACKGROUND",(status_col,i),(status_col,i),s_colors[st])
+            base_cmds.append(("BACKGROUND",(status_col,i),(status_col,i),s_colors[st]))
+        tbl.setStyle(TableStyle(base_cmds))
         elements.append(tbl)
         total_val = sum(it.get_total_stock()*it.unit_price for it in items)
         elements.append(Spacer(1,0.4*cm))
@@ -1180,6 +1324,26 @@ def list_backups():
 def download_backup(name):
     backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
     return send_from_directory(backup_dir, name, as_attachment=True)
+
+@api.route("/backup/restore", methods=["POST"])
+@require_role("admin")
+def restore_backup():
+    data = request.get_json() or {}
+    name = data.get("name","")
+    if not name: return err("يجب تحديد اسم ملف الاستعادة")
+    backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
+    backup_path = os.path.join(backup_dir, name)
+    if not os.path.isfile(backup_path): return err("ملف الاستعادة غير موجود")
+    db_path = current_app.config.get("SQLALCHEMY_DATABASE_URI","").replace("sqlite:///","")
+    if not db_path: return err("غير مدعوم لقواعد البيانات غير SQLite")
+    db_path = os.path.join(os.path.dirname(current_app.root_path), db_path)
+    try:
+        import shutil
+        shutil.copy2(backup_path, db_path)
+        AuditService.log("restore","database",0,f"استعادة قاعدة البيانات من: {name}")
+        return ok(message=f"تمت استعادة قاعدة البيانات من {name}")
+    except Exception as e:
+        return err(f"فشلت الاستعادة: {str(e)}")
 
 # ══════════════════════════════════════════════════════════════
 #  PROCUREMENT — PURCHASE REQUESTS
