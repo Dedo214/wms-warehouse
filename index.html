@@ -126,8 +126,69 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
         📱 موبايل: <code>http://[IP الجهاز]:5000</code>
       </div>
     </div>
+    </div>
   </div>
-</div>
+
+  <!-- REP: CON (consumption) -->
+  <div id="rep-con" style="display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
+      <span style="font-size:13px;color:var(--mut)">تقرير الاستهلاك — الأصناف الأكثر استهلاكاً</span>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('consumption')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','consumption')">📄 CSV</button></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
+      <span style="font-size:12px;color:var(--mut)">آخر</span>
+      <select id="condays" onchange="loadConRep()" style="width:auto;font-size:12px"><option value="30">30</option><option value="60">60</option><option value="90">90</option><option value="180">180</option><option value="365">365</option></select>
+      <span style="font-size:12px;color:var(--mut)">يوم</span>
+      <span style="font-size:12px;color:var(--mut);margin:0 4px">|</span>
+      <span style="font-size:12px;color:var(--mut)">العدد</span>
+      <select id="conlim" onchange="loadConRep()" style="width:auto;font-size:12px"><option value="10">10</option><option value="20">20</option><option value="50">50</option></select>
+      <span style="font-size:12px;color:var(--mut);margin:0 4px">|</span>
+      <button class="btn bo bsm" onclick="loadConRep()">🔍 بحث</button>
+    </div>
+    <div class="sg s3" id="conkpis" style="margin-bottom:12px"></div>
+    <div class="card"><div class="tw tscr"><table><thead><tr><th>الصنف</th><th>الفئة</th><th>إجمالي الكمية</th><th>عدد الحركات</th><th>متوسط الكمية</th></tr></thead><tbody id="conbd"></tbody></table></div></div>
+  </div>
+
+  <!-- REP: FS (fast/slow moving) -->
+  <div id="rep-fs" style="display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
+      <span style="font-size:13px;color:var(--mut)">تحليل سرعة الحركة — الأسرع والأبطأ</span>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('fastslow')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','fastslow')">📄 CSV</button></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
+      <span style="font-size:12px;color:var(--mut)">آخر</span>
+      <select id="fsdays" onchange="loadFsRep()" style="width:auto;font-size:12px"><option value="90">90</option><option value="30">30</option><option value="180">180</option><option value="365">365</option></select>
+      <span style="font-size:12px;color:var(--mut)">يوم</span>
+      <span style="font-size:12px;color:var(--mut);margin:0 4px">|</span>
+      <span style="font-size:12px;color:var(--mut)">العدد</span>
+      <select id="fslim" onchange="loadFsRep()" style="width:auto;font-size:12px"><option value="10">10</option><option value="20">20</option><option value="30">30</option></select>
+      <button class="btn bo bsm" onclick="loadFsRep()">🔍 بحث</button>
+    </div>
+    <div class="sg s2" style="margin-bottom:12px">
+      <div class="card"><div class="ch"><div class="ct">⚡ سريعة الحركة</div></div><div class="tw tscr"><table><thead><tr><th>الصنف</th><th>الكمية المباعة</th><th>عدد الحركات</th><th>المخزون الحالي</th></tr></thead><tbody id="fsfastbd"></tbody></table></div></div>
+      <div class="card"><div class="ch"><div class="ct">🐢 بطيئة الحركة</div></div><div class="tw tscr"><table><thead><tr><th>الصنف</th><th>الكمية المباعة</th><th>عدد الحركات</th><th>المخزون الحالي</th></tr></thead><tbody id="fsslowbd"></tbody></table></div></div>
+    </div>
+  </div>
+
+  <!-- REP: SP (supplier performance) -->
+  <div id="rep-sp" style="display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
+      <span style="font-size:13px;color:var(--mut)">تقرير أداء الموردين</span>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('supplier_perf')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','supplier_perf')">📄 CSV</button></div>
+    </div>
+    <div class="sg s4" id="spkpis" style="margin-bottom:12px"></div>
+    <div class="card"><div class="tw tscr"><table><thead><tr><th>المورد</th><th>التصنيف</th><th>عدد أوامر الشراء</th><th>الإجمالي</th><th>عدد الإستلامات</th><th>تقييم التسليم</th><th>تقييم الجودة</th><th>المعدل</th></tr></thead><tbody id="spbd"></tbody></table></div></div>
+  </div>
+
+  <!-- REP: VAL (valuation) -->
+  <div id="rep-val" style="display:none">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center">
+      <span style="font-size:13px;color:var(--mut)">تقييم المخزون (FIFO)</span>
+      <div style="display:flex;gap:7px"><button class="btn bo bsm" onclick="expXL('valuation')">📊 Excel</button><button class="btn bo bsm" onclick="expFile('csv','valuation')">📄 CSV</button><button class="btn bo bsm" onclick="expFile('pdf','valuation')">🖨️ PDF</button></div>
+    </div>
+    <div class="sg s3" id="valkpis" style="margin-bottom:12px"></div>
+    <div class="card"><div class="ch"><div class="ct">🧾 طبقات التكلفة (FIFO Layers)</div></div><div class="tw tscr"><table><thead><tr><th>الصنف</th><th>إجمالي الكمية</th><th>متوسط التكلفة</th><th>إجمالي القيمة</th><th>عدد الطبقات</th></tr></thead><tbody id="valbd"></tbody></table></div></div>
+  </div>
 
 <!-- APP -->
 <div class="app" id="apg" style="display:none">
@@ -357,8 +418,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <button class="tab" onclick="stab(this,'reptabs');showRep('daily')">📅 الحركات</button>
       <button class="tab" onclick="stab(this,'reptabs');showRep('tr')">🔄 التحويلات</button>
       <button class="tab" onclick="stab(this,'reptabs');showRep('diff')">⚖️ فروقات الجرد</button>
-      <button class="tab" onclick="stab(this,'reptabs');showRep('bud')">🏗️ الميزانية</button>
-    </div>
+    <button class="tab" onclick="stab(this,'reptabs');showRep('bud')">🏗️ الميزانية</button>
+    <button class="tab" onclick="stab(this,'reptabs');showRep('con')">📉 الاستهلاك</button>
+    <button class="tab" onclick="stab(this,'reptabs');showRep('fs')">⏱️ سرعة الحركة</button>
+    <button class="tab" onclick="stab(this,'reptabs');showRep('sp')">🏭 أداء الموردين</button>
+    <button class="tab" onclick="stab(this,'reptabs');showRep('val')">💰 تقييم المخزون</button>
+  </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:10px;background:var(--c2);border-radius:var(--rad);border:1px solid var(--bdr);align-items:center" id="repdatebar">
       <span style="font-size:12px;color:var(--mut)">📆 المدة:</span>
       <button class="btn bo bsm" onclick="setRepPeriod(7)">أسبوعي</button>
@@ -1717,9 +1782,9 @@ function expStkInq(){
 // ══════════════════════════════════════════════
 //  REPORTS
 // ══════════════════════════════════════════════
-const REPS=['bal','daily','tr','diff','bud'];
+const REPS=['bal','daily','tr','diff','bud','con','fs','sp','val'];
 let currentRepId='bal';
-function showRep(id){currentRepId=id;REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r===id?'block':'none';});document.getElementById('repdatebar').style.display=id==='bal'||id==='bud'?'none':'flex';refreshCurrentRep();}
+function showRep(id){currentRepId=id;REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r===id?'block':'none';});document.getElementById('repdatebar').style.display=id==='bal'||id==='bud'||id==='con'||id==='fs'||id==='sp'||id==='val'?'none':'flex';refreshCurrentRep();}
 function setRepPeriod(days){
   const d=new Date();const to=d.toISOString().slice(0,10);
   d.setDate(d.getDate()-days);const from=d.toISOString().slice(0,10);
@@ -1732,6 +1797,10 @@ function refreshCurrentRep(){
   else if(currentRepId==='tr')loadTrRep();
   else if(currentRepId==='diff')loadDiffRep();
   else if(currentRepId==='bud')loadBudRep();
+  else if(currentRepId==='con')loadConRep();
+  else if(currentRepId==='fs')loadFsRep();
+  else if(currentRepId==='sp')loadSpRep();
+  else if(currentRepId==='val')loadValRep();
 }
 function repDateParams(){
   const df=document.getElementById('repdf')?.value,dt=document.getElementById('repdt')?.value;
@@ -1743,6 +1812,10 @@ async function loadRepKpis(){const r=await $api('GET','/api/reports/balance');if
 async function loadDailyRep(){const p=repDateParams();const r=await $api('GET',`/api/reports/daily?${p}`);if(!r?.success)return;const{movements,summary}=r.data;document.getElementById('drep').innerHTML=`<div class="sc sc-g" style="padding:11px"><div class="sl">وارد</div><div class="sv" style="color:var(--gl);font-size:20px">+${summary.total_in}</div></div><div class="sc sc-r" style="padding:11px"><div class="sl">صرف</div><div class="sv" style="color:var(--rl);font-size:20px">-${summary.total_out}</div></div><div class="sc" style="padding:11px;border-top-color:#8E44AD"><div class="sl">مرتجع</div><div class="sv" style="color:#8E44AD;font-size:20px">+${summary.total_return||0}</div></div><div class="sc" style="padding:11px;border-top-color:#E67E22"><div class="sl">هالك</div><div class="sv" style="color:#E67E22;font-size:20px">-${summary.total_damage||0}</div></div><div class="sc sc-b" style="padding:11px"><div class="sl">الحركات</div><div class="sv" style="font-size:20px">${summary.count}</div></div>`;document.getElementById('drepbd').innerHTML=movements.map(m=>`<tr><td class="tn">${m.created_date}</td><td class="tn">${m.created_time}</td><td class="tb2">${m.item_name}</td><td>${tbdg(m.type)}</td><td style="font-weight:700">${m.quantity}</td><td>${m.item_unit}</td><td>${wtag(m.warehouse_name)}</td><td style="font-size:12px">${m.user_name}</td><td class="tn">${m.ref_number||'—'}</td><td style="font-size:12px;color:var(--mut)">${m.project||'—'}</td><td style="font-size:12px">${m.engineer_name||'—'}</td></tr>`).join('')||'<tr><td colspan="11" class="ldg">لا توجد حركات في هذه الفترة</td></tr>';}
 async function loadTrRep(){const p=repDateParams();const r=await $api('GET',`/api/reports/transfers?${p}`);if(!r?.success)return;const{transfers,summary}=r.data;document.getElementById('trrepkpis').innerHTML=`<div class="sc sc-b" style="padding:11px"><div class="sl">إجمالي</div><div class="sv" style="font-size:20px">${summary.total}</div></div><div class="sc sc-a" style="padding:11px"><div class="sl">معلق</div><div class="sv" style="color:var(--al);font-size:20px">${summary.pending}</div></div><div class="sc sc-g" style="padding:11px"><div class="sl">منفذ</div><div class="sv" style="color:var(--gl);font-size:20px">${summary.executed}</div></div><div class="sc sc-r" style="padding:11px"><div class="sl">مرفوض</div><div class="sv" style="color:var(--rl);font-size:20px">${summary.rejected}</div></div>`;document.getElementById('trrepbd').innerHTML=transfers.map(t=>`<tr><td class="tn">${t.ref_number}</td><td class="tb2">${t.item_name}</td><td>${t.quantity} ${t.item_unit}</td><td>${wtag(t.from_warehouse_name)}</td><td>${wtag(t.to_warehouse_name)}</td><td style="font-size:12px">${t.requester_name}</td><td class="tn">${t.created_date}</td><td>${stbdg(t.status,t.status_label)}</td></tr>`).join('');}
 async function loadDiffRep(){const r=await $api('GET','/api/counts');if(!r?.success)return;const diffs=[];const df=document.getElementById('repdf')?.value,dt=document.getElementById('repdt')?.value;for(const c of r.data.filter(x=>x.status==='completed')){if(df&&c.started_at&&c.started_at.slice(0,10)<df)continue;if(dt&&c.started_at&&c.started_at.slice(0,10)>dt)continue;const cr=await $api('GET',`/api/counts/${c.id}`);if(!cr?.success)continue;(cr.data.lines||[]).forEach(l=>{if(l.difference!==null&&l.difference!==0) diffs.push({...l,warehouse:c.warehouse_name,date:c.started_at?.slice(0,10)||''});});}document.getElementById('diffbd').innerHTML=diffs.map(d=>`<tr><td class="tb2">${d.item_name}</td><td>${wtag(d.warehouse)}</td><td>${d.system_quantity}</td><td>${d.actual_quantity}</td><td style="color:var(--rl);font-weight:700">${d.difference>0?'+':''}${d.difference}</td><td class="tn">${d.date}</td></tr>`).join('')||'<tr><td colspan="6" class="ldg">لا توجد فروقات في هذه الفترة</td></tr>';}
+async function loadConRep(){const d=document.getElementById('condays')?.value||30;const l=document.getElementById('conlim')?.value||20;const r=await $api('GET',`/api/reports/consumption?days=${d}&limit=${l}`);if(!r?.success)return;const items=r.data||[];const totQ=items.reduce((s,i)=>s+(i.total_quantity||0),0);const totC=items.reduce((s,i)=>s+(i.count||0),0);document.getElementById('conkpis').innerHTML=`<div class="sc sc-b"><div class="si">📦</div><div class="sl">الأصناف</div><div class="sv">${items.length}</div></div><div class="sc sc-g"><div class="si">📊</div><div class="sl">إجمالي الكمية</div><div class="sv">${totQ}</div></div><div class="sc sc-a"><div class="si">🔄</div><div class="sl">إجمالي الحركات</div><div class="sv">${totC}</div></div>`;document.getElementById('conbd').innerHTML=items.map(i=>`<tr><td class="tb2">${i.item_name||i.name||'—'}</td><td>${i.category_name||i.category||'—'}</td><td style="font-weight:700">${i.total_quantity||0}</td><td>${i.count||i.movement_count||0}</td><td>${i.average_quantity?i.average_quantity.toFixed(1):((i.total_quantity||0)/Math.max(i.count||1,1)).toFixed(1)}</td></tr>`).join('')||'<tr><td colspan="5" class="ldg">لا توجد بيانات</td></tr>';}
+async function loadFsRep(){const d=document.getElementById('fsdays')?.value||90;const l=document.getElementById('fslim')?.value||10;const r=await $api('GET',`/api/reports/fast-slow?days=${d}&limit=${l}`);if(!r?.success)return;const d2=r.data;document.getElementById('fsfastbd').innerHTML=(d2.fast_moving||[]).map(i=>`<tr><td class="tb2">${i.item_name||'—'}</td><td style="font-weight:700;color:var(--gl)">${i.total_quantity||0}</td><td>${i.count||0}</td><td>${i.current_stock||0}</td></tr>`).join('')||'<tr><td colspan="4" class="ldg">لا توجد أصناف سريعة</td></tr>';document.getElementById('fsslowbd').innerHTML=(d2.slow_moving||[]).map(i=>`<tr><td class="tb2">${i.item_name||'—'}</td><td style="font-weight:700;color:var(--rl)">${i.total_quantity||0}</td><td>${i.count||0}</td><td>${i.current_stock||0}</td></tr>`).join('')||'<tr><td colspan="4" class="ldg">لا توجد أصناف بطيئة</td></tr>';}
+async function loadSpRep(){const r=await $api('GET','/api/reports/supplier-performance');if(!r?.success)return;const items=r.data||[];const totPO=items.reduce((s,i)=>s+(i.po_count||0),0);const totAmt=items.reduce((s,i)=>s+(i.total_amount||0),0);const totGRN=items.reduce((s,i)=>s+(i.grn_count||0),0);document.getElementById('spkpis').innerHTML=`<div class="sc sc-b"><div class="si">🏭</div><div class="sl">الموردين</div><div class="sv">${items.length}</div></div><div class="sc sc-g"><div class="si">📄</div><div class="sl">أوامر الشراء</div><div class="sv">${totPO}</div></div><div class="sc sc-a"><div class="si">💰</div><div class="sl">الإجمالي</div><div class="sv">${curSym()}${fmtN(totAmt)}</div></div><div class="sc" style="border-top-color:#8E44AD"><div class="si">📥</div><div class="sl">الإستلامات</div><div class="sv">${totGRN}</div></div>`;document.getElementById('spbd').innerHTML=items.map(i=>{const avg=i.avg_delivery_accuracy&&i.avg_quality_score?((i.avg_delivery_accuracy||0)+(i.avg_quality_score||0))/2:0;const grade=avg>=4?'ممتاز':avg>=3?'جيد':avg>=2?'متوسط':'ضعيف';const gc=avg>=4?'b-s':avg>=3?'b-w':avg>=2?'b-i':'b-d';return`<tr><td class="tb2">${i.supplier_name||'—'}</td><td><span class="bdg ${gc}">${grade}</span></td><td>${i.po_count||0}</td><td>${curSym()}${fmtN(i.total_amount||0)}</td><td>${i.grn_count||0}</td><td>${i.avg_delivery_accuracy?('⭐'.repeat(Math.round(i.avg_delivery_accuracy))):'—'}</td><td>${i.avg_quality_score?('⭐'.repeat(Math.round(i.avg_quality_score))):'—'}</td><td style="font-weight:700">${avg?avg.toFixed(1):'—'}</td></tr>`;}).join('')||'<tr><td colspan="8" class="ldg">لا توجد بيانات</td></tr>';}
+async function loadValRep(){const r=await $api('GET','/api/stock/valuation');if(!r?.success)return;const items=r.data||[];const totQ=items.reduce((s,i)=>s+(i.total_quantity||0),0);const totV=items.reduce((s,i)=>s+(i.total_value||0),0);const totL=items.reduce((s,i)=>s+(i.layer_count||i.layers?.length||0),0);document.getElementById('valkpis').innerHTML=`<div class="sc sc-b"><div class="si">📦</div><div class="sl">الأصناف</div><div class="sv">${items.length}</div></div><div class="sc sc-g"><div class="si">📊</div><div class="sl">إجمالي الكمية</div><div class="sv">${totQ}</div></div><div class="sc sc-a"><div class="si">💰</div><div class="sl">إجمالي القيمة</div><div class="sv">${curSym()}${fmtN(totV)}</div></div>`;document.getElementById('valbd').innerHTML=items.map(i=>{const lc=i.layer_count||i.layers?.length||0;const avg=i.average_cost||(i.total_quantity>0?(i.total_value/i.total_quantity):0);return`<tr><td class="tb2">${i.item_name||i.name||'—'}</td><td style="font-weight:700">${i.total_quantity||0}</td><td>${curSym()}${avg.toFixed(2)}</td><td>${curSym()}${fmtN(i.total_value||0)}</td><td>${lc}</td></tr>`;}).join('')||'<tr><td colspan="5" class="ldg">لا توجد بيانات</td></tr>';}
 
 // ══════════════════════════════════════════════
 //  AUDIT & NOTIFICATIONS
