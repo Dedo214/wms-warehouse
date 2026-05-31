@@ -552,8 +552,11 @@ class RFQ(db.Model):
                 "notes":self.notes or "",
                 "status":self.status,
                 "status_label":self.STATUS_LABELS.get(self.status,self.status),
+                "items":[i.to_dict() for i in self.items],
                 "suppliers":[s.to_dict() for s in self.suppliers],
                 "quotations":[q.to_dict() for q in self.quotations],
+                "suppliers_count":len(self.suppliers),
+                "quotations_count":len(self.quotations),
                 "created_at":self.created_at.isoformat()}
 
 class RFQSupplier(db.Model):
@@ -572,6 +575,21 @@ class RFQSupplier(db.Model):
                 "supplier_name":self.supplier.name if self.supplier else "",
                 "emailed":self.emailed,"whatsapped":self.whatsapped,
                 "responded":self.responded}
+
+class RFQItem(db.Model):
+    __tablename__ = "rfq_items"
+    id        = db.Column(db.Integer, primary_key=True)
+    rfq_id    = db.Column(db.Integer, db.ForeignKey("rfqs.id"))
+    item_name = db.Column(db.String(200))
+    quantity  = db.Column(db.Float)
+    unit      = db.Column(db.String(20))
+    notes     = db.Column(db.Text)
+    rfq   = db.relationship("RFQ", backref="items")
+    def to_dict(self):
+        return {"id":self.id,"rfq_id":self.rfq_id,
+                "item_name":self.item_name or "",
+                "quantity":self.quantity,"unit":self.unit or "",
+                "notes":self.notes or ""}
 
 class Quotation(db.Model):
     __tablename__ = "quotations"
@@ -724,6 +742,7 @@ class GRNItem(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
     grn_id       = db.Column(db.Integer, db.ForeignKey("goods_receipts.id"))
     po_item_id   = db.Column(db.Integer, db.ForeignKey("po_items.id"), nullable=True)
+    item_id      = db.Column(db.Integer, db.ForeignKey("items.id"), nullable=True)
     item_name    = db.Column(db.String(200))
     ordered_qty  = db.Column(db.Float)
     received_qty = db.Column(db.Float)
@@ -734,9 +753,10 @@ class GRNItem(db.Model):
     total        = db.Column(db.Float)
     grn     = db.relationship("GoodsReceipt", back_populates="items")
     po_item = db.relationship("POItem")
+    item    = db.relationship("Item")
     def to_dict(self):
         return {"id":self.id,"grn_id":self.grn_id,
-                "po_item_id":self.po_item_id,
+                "po_item_id":self.po_item_id,"item_id":self.item_id,
                 "item_name":self.item_name or "",
                 "ordered_qty":self.ordered_qty,"received_qty":self.received_qty,
                 "damaged_qty":self.damaged_qty,"rejected_qty":self.rejected_qty,

@@ -573,7 +573,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <button class="btn bp" onclick="openM('rfqadd')">+ طلب عرض سعر</button>
     </div>
     <div class="card"><div class="ch"><div class="ct">📨 طلبات عروض الأسعار</div></div>
-      <div class="tw tscr" style="max-height:500px"><table><thead><tr><th>المرجع</th><th>تاريخ الطلب</th><th>آخر موعد</th><th>الموردين</th><th>عروض</th><th>الحالة</th><th></th></tr></thead><tbody id="rfqbd"></tbody></table></div>
+      <div class="tw tscr" style="max-height:500px"><table><thead><tr><th>المرجع</th><th>تاريخ الطلب</th><th>آخر موعد</th><th>الأصناف</th><th>الموردين</th><th>عروض</th><th>الحالة</th><th></th></tr></thead><tbody id="rfqbd"></tbody></table></div>
       <div id="rfqpg" class="pgb" style="padding-top:10px;border-top:1px solid var(--bdr);margin-top:10px"></div>
     </div>
   </div>
@@ -589,7 +589,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       </div>
       <div class="sw2"><input type="text" id="qts" placeholder="بحث..." style="width:180px" oninput="deb(loadQts,400)()"><span class="swi">🔍</span></div>
     </div>
-    <div class="card"><div class="ch"><div class="ct">💵 عروض الأسعار</div></div>
+    <div class="card"><div class="ch"><div class="ct">💵 عروض الأسعار</div><button class="btn bp bsm" onclick="openQtAdd()">➕ إضافة عرض سعر</button></div>
       <div class="tw tscr" style="max-height:500px"><table><thead><tr><th>المرجع</th><th>المورد</th><th>طلب العرض</th><th>تاريخ العرض</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody id="qtbd"></tbody></table></div>
       <div id="qtpg" class="pgb" style="padding-top:10px;border-top:1px solid var(--bdr);margin-top:10px"></div>
     </div>
@@ -956,10 +956,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mb">
     <div class="fr2"><div class="fg"><label class="fl">طلب الشراء</label><select id="rfqpr" onchange="rfqPRChanged()"><option value="">بدون</option></select></div><div class="fg"><label class="fl">آخر موعد للتقديم</label><input type="date" id="rfqvalid"></div></div>
     <div class="fg"><label class="fl">الموردين *</label><select id="rfqsups" multiple style="height:100px"></select><span class="ferr" id="erfqsups"></span></div>
+    <div class="div"></div>
+    <div class="ct">🧾 الأصناف المطلوبة</div>
+    <div class="tw" id="rfqitemscont"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>ملاحظات</th></tr></thead><tbody id="rfqitems"></tbody></table></div>
+    <div style="margin-top:6px;display:flex;gap:7px;align-items:center"><button class="btn bo bsm" onclick="addRFQItemRow()">+ إضافة صنف</button><span id="rfqprinfo" style="font-size:11px;color:var(--mut)"></span></div>
+    <div class="div"></div>
     <div class="fg"><label class="fl">ملاحظات</label><textarea id="rfqnt" rows="2"></textarea></div>
     <div class="alert al-d" id="rfqerr" style="display:none"></div>
   </div>
   <div class="mf"><button class="btn bo" onclick="closeM('rfqadd')">إلغاء</button><button class="btn bp" onclick="subRFQ()">💾 حفظ</button></div>
+</div></div>
+
+<!-- QUOTATION ADD MODAL -->
+<div class="ov" id="ov-qtadd"><div class="modal mlg">
+  <div class="mh"><div><div class="mt2">📄 إضافة عرض سعر</div></div><button class="mc" onclick="closeM('qtadd')">×</button></div>
+  <div class="mb">
+    <div class="fr2"><div class="fg"><label class="fl">طلب عرض السعر</label><select id="qtrfq" onchange="qtRFQChanged()"><option value="">اختر</option></select></div><div class="fg"><label class="fl">المورد *</label><select id="qtsup"><option value="">اختر</option></select><span class="ferr" id="eqtsup"></span></div></div>
+    <div class="fr2"><div class="fg"><label class="fl">صالح حتى</label><input type="date" id="qtvalid"></div><div class="fg"><label class="fl">سعر التوصيل</label><input type="number" id="qtship" placeholder="0" step="0.01"></div></div>
+    <div class="fg"><label class="fl">ملاحظات</label><textarea id="qtnt" rows="2"></textarea></div>
+    <div class="div"></div>
+    <div class="ct">🧾 الأصناف والعروض</div>
+    <div class="tw" id="qtitemscont"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody id="qtitems"></tbody></table></div>
+    <div style="margin-top:6px;display:flex;gap:7px;align-items:center"><button class="btn bo bsm" onclick="addQtItemRow()">+ إضافة صنف</button><span id="qtrfqinfo" style="font-size:11px;color:var(--mut)"></span></div>
+    <div class="alert al-d" id="qterr" style="display:none"></div>
+  </div>
+  <div class="mf"><button class="btn bo" onclick="closeM('qtadd')">إلغاء</button><button class="btn bp" onclick="subQt()">💾 حفظ عرض السعر</button></div>
 </div></div>
 
 <!-- PO ADD/EDIT MODAL -->
@@ -2048,7 +2069,8 @@ async function loadPRs(status){
     const act=`<button class="btn bxs bo" onclick="showPRDetail(${p.id})" title="عرض">📋</button>`
       +(p.status==='draft'?`<button class="btn bxs bs" onclick="subPR(${p.id})" style="margin-right:4px" title="إرسال للمراجعة">📨</button>`:'')
       +(p.status==='pending'?`<button class="btn bxs bs" onclick="openPRApprove(${p.id})" style="margin-right:4px">✅</button>`:'')
-      +(p.status==='draft'?`<button class="btn bxs bo" onclick="editPR(${p.id})" style="margin-right:4px" title="تعديل">✏️</button>`:'');
+      +(p.status==='draft'?`<button class="btn bxs bo" onclick="editPR(${p.id})" style="margin-right:4px" title="تعديل">✏️</button>`:'')
+      +(p.status==='approved'?`<button class="btn bxs bp" onclick="createRFQFromPR(${p.id})" style="margin-right:4px" title="إنشاء طلب عرض سعر">📨</button>`:'');
     return`<tr><td class="tn">${p.ref_number}</td><td>${p.requester_name||p.creator_name||'—'}</td><td>${p.department||'—'}</td><td style="font-size:11px">${p.created_date||''}</td><td>${p.items?.length||0}</td><td style="direction:ltr">${curSym()}${fmtN(p.total_amount||0)}</td><td>${stbdg(p.status,{draft:'مسودة',pending:'قيد المراجعة',approved:'معتمد',rejected:'مرفوض',cancelled:'ملغي'}[p.status]||p.status)}</td><td style="white-space:nowrap">${act}</td></tr>`;
   }).join('') : '<tr><td colspan="8" class="ldg">لا توجد طلبات شراء</td></tr>';
   document.getElementById('prpg').innerHTML=mkPgBar(total,PRpg,'loadPRsPage({i})');
@@ -2070,6 +2092,7 @@ async function showPRDetail(id){
     <div class="tw"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${
     (p.items||[]).map(i=>`<tr><td>${i.item_name||'—'}</td><td>${i.quantity}</td><td style="direction:ltr">${curSym()}${fmtN(i.unit_price||0)}</td><td style="direction:ltr">${curSym()}${fmtN((i.quantity||0)*(i.unit_price||0))}</td></tr>`).join('')||'<tr><td colspan="4" class="ldg">لا توجد أصناف</td></tr>'}</tbody></table></div>
     <div class="div"></div>
+    <div style="display:flex;gap:7px;margin-bottom:8px">${p.status==='approved'?`<button class="btn bp bsm" onclick="closeM('prdetail');createRFQFromPR(${id})">📨 إنشاء طلب عرض سعر</button>`:''}</div>
     <div class="ct">📋 سجل الاعتماد</div>
     <div class="tw"><table><thead><tr><th>المستوى</th><th>المعتمد</th><th>الإجراء</th><th>ملاحظات</th><th>التاريخ</th></tr></thead><tbody>${
     (p.approvals||[]).map(a=>`<tr><td>${a.level||1}</td><td>${a.approver_name||'—'}</td><td>${a.action==='approve'?'✅ معتمد':'❌ مرفوض'}</td><td>${a.notes||'—'}</td><td style="font-size:11px">${a.created_date||''}</td></tr>`).join('')||'<tr><td colspan="5" class="ldg">لا توجد سجلات اعتماد</td></tr>'}</tbody></table></div>
@@ -2155,6 +2178,20 @@ async function subPRApprove(){
   toast(act==='approve'?'✅ تم الاعتماد':'❌ تم الرفض','s');
   closeM('prapprove');loadPRs(PRstatus);
 }
+async function createRFQFromPR(prId){
+  const r=await $api('GET',`/api/procurement/pr/${prId}`);if(!r?.success){toast('فشل تحميل الطلب','e');return;}
+  const p=r.data;
+  closeM('prdetail');
+  document.getElementById('rfqpr').value=prId;
+  document.getElementById('rfqvalid').value='';
+  document.getElementById('rfqnt').value='';
+  document.getElementById('rfqitems').innerHTML='';
+  document.getElementById('rfqprinfo').textContent='';
+  if(p.items&&p.items.length){p.items.forEach(i=>addRFQItemRow([{item_name:i.item_name,quantity:i.quantity,unit:i.unit||''}]));}
+  else addRFQItemRow();
+  document.getElementById('rfqerr').style.display='none';
+  openM('rfqadd');toast('تم تحميل الأصناف من طلب الشراء ✅','s');
+}
 
 // ─── RFQ ───
 async function loadRFQs(){
@@ -2162,8 +2199,8 @@ async function loadRFQs(){
   const r=await $api('GET',`/api/procurement/rfq?search=${encodeURIComponent(s)}`);if(!r?.success)return;
   const items=r.data?.rfqs||r.data||[];
   document.getElementById('rfqbd').innerHTML=items.length?items.map(p=>{
-    return`<tr><td class="tn">${p.ref_number}</td><td style="font-size:11px">${p.created_date||''}</td><td style="font-size:11px">${p.valid_until||p.deadline||'—'}</td><td>${p.suppliers_count||0}</td><td>${p.quotations_count||0}</td><td>${stbdg(p.status,{draft:'مسودة',sent:'مرسل',closed:'مغلق'}[p.status]||p.status)}</td><td><button class="btn bxs bo" onclick="showRFQCompare(${p.id})" title="مقارنة">⚖️</button><button class="btn bxs bo" onclick="loadQts('all',${p.id})" style="margin-right:4px">💵 عروض</button></td></tr>`;
-  }).join('') : '<tr><td colspan="7" class="ldg">لا توجد طلبات عروض</td></tr>';
+    return`<tr><td class="tn">${p.ref_number}</td><td style="font-size:11px">${p.created_date||''}</td><td style="font-size:11px">${p.valid_until||p.deadline||'—'}</td><td>${p.items?.length||0}</td><td>${p.suppliers_count||(p.suppliers?.length||0)}</td><td>${p.quotations_count||0}</td><td>${stbdg(p.status,{draft:'مسودة',sent:'مرسل',closed:'مغلق'}[p.status]||p.status)}</td><td><button class="btn bxs bo" onclick="showRFQCompare(${p.id})" title="مقارنة">⚖️</button><button class="btn bxs bo" onclick="loadQts('all',${p.id})" style="margin-right:4px">💵 عروض</button></td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="ldg">لا توجد طلبات عروض</td></tr>';
 }
 
 async function showRFQCompare(rfqId){
@@ -2189,8 +2226,27 @@ async function subRFQ(){
   const supIds=[...supEl.selectedOptions].map(o=>parseInt(o.value)).filter(v=>v);
   if(!supIds.length){shFe('erfqsups','اختر مورداً واحداً على الأقل');return;}
   clrErr(['erfqsups']);
-  const r=await $api('POST','/api/procurement/rfq',{pr_id:prId?parseInt(prId):null,valid_until:valid||null,supplier_ids:supIds,notes:document.getElementById('rfqnt').value.trim()});if(!r?.success){shAe('rfqerr',r?.error||'فشل الحفظ');return;}
+  const items=[];document.querySelectorAll('#rfqitems tr').forEach(tr=>{const nm=tr.querySelector('.ritm')?.value;const qty=tr.querySelector('.rqty')?.value;if(nm&&qty)items.push({item_name:nm,quantity:parseFloat(qty),unit:tr.querySelector('.run')?.value||'',notes:tr.querySelector('.rnt')?.value||''});});
+  const r=await $api('POST','/api/procurement/rfq',{pr_id:prId?parseInt(prId):null,valid_until:valid||null,supplier_ids:supIds,items,notes:document.getElementById('rfqnt').value.trim()});if(!r?.success){shAe('rfqerr',r?.error||'فشل الحفظ');return;}
   toast('تم إنشاء طلب العرض ✅','s');closeM('rfqadd');loadRFQs();
+}
+function addRFQItemRow(data){
+  const tb=document.getElementById('rfqitems');
+  const d=(data||[])[0]||{};
+  const tr=document.createElement('tr');tr.innerHTML=`<td><input class="ritm" value="${d.item_name||''}" placeholder="اسم الصنف" style="width:140px"></td><td><input class="rqty" type="number" value="${d.quantity||''}" placeholder="0" min="0.01" step="0.01" style="width:70px"></td><td><input class="run" value="${d.unit||''}" placeholder="وحدة" style="width:60px"></td><td><input class="rnt" value="${d.notes||''}" placeholder="ملاحظات" style="width:100px"></td><td><button class="btn bxs bd" onclick="this.closest('tr').remove()">🗑️</button></td></tr>`;
+  tb.appendChild(tr);
+}
+async function rfqPRChanged(){
+  const prId=document.getElementById('rfqpr').value;
+  const info=document.getElementById('rfqprinfo');const tb=document.getElementById('rfqitems');
+  tb.innerHTML='';info.textContent='';
+  if(!prId){addRFQItemRow();return;}
+  info.textContent='جاري تحميل الأصناف...';
+  const r=await $api('GET',`/api/procurement/pr/${prId}`);if(!r?.success){info.textContent='فشل تحميل الأصناف';return;}
+  const p=r.data;info.textContent=`طلب الشراء: ${p.ref_number} — ${p.items?.length||0} صنف`;
+  tb.innerHTML='';
+  if(p.items&&p.items.length){p.items.forEach(i=>addRFQItemRow([{item_name:i.item_name,quantity:i.quantity,unit:i.unit||''}]));}
+  else{addRFQItemRow();}
 }
 
 // ─── QUOTATIONS ───
@@ -2200,10 +2256,10 @@ async function loadQts(status,rfqId){
   const r=await $api('GET',`/api/procurement/quotations?status=${status||''}&search=${encodeURIComponent(s)}${p}`);if(!r?.success)return;
   const items=r.data?.quotations||r.data||[];
   document.getElementById('qtbd').innerHTML=items.length?items.map(q=>{
-    const act=(q.status==='sent'?`<button class="btn bxs bs" onclick="acceptQt(${q.id})">✅ قبول</button>`:'')+
-      (q.status==='sent'?`<button class="btn bxs bd" onclick="rejectQt(${q.id})" style="margin-right:4px">❌ رفض</button>`:'')+
-      `<button class="btn bxs bo" onclick="showQtDetail(${q.id})" style="margin-right:4px">📋</button>`;
-    return`<tr><td class="tn">${q.ref_number}</td><td>${q.supplier_name||'—'}</td><td class="tn">${q.rfq_ref||'—'}</td><td style="font-size:11px">${q.created_date||''}</td><td style="direction:ltr">${curSym()}${fmtN(q.total_amount||0)}</td><td>${stbdg(q.status,{draft:'مسودة',sent:'مرسل',accepted:'مقبول',rejected:'مرفوض'}[q.status]||q.status)}</td><td style="white-space:nowrap">${act}</td></tr>`;
+    let btn='<button class="btn bxs bo" onclick="showQtDetail('+q.id+')" style="margin-right:4px">📋</button>';
+    if(q.status==='sent')btn+=`<button class="btn bxs bs" onclick="acceptQt(${q.id})" style="margin-right:4px">✅ قبول</button><button class="btn bxs bd" onclick="rejectQt(${q.id})" style="margin-right:4px">❌ رفض</button>`;
+    if(q.status==='accepted')btn+=`<button class="btn bxs bp" onclick="createPOFromQt(${q.id})" style="margin-right:4px">📄 إنشاء أمر شراء</button>`;
+    return`<tr><td class="tn">${q.ref_number}</td><td>${q.supplier_name||'—'}</td><td class="tn">${q.rfq_ref||'—'}</td><td style="font-size:11px">${q.created_date||''}</td><td style="direction:ltr">${curSym()}${fmtN(q.total_amount||0)}</td><td>${stbdg(q.status,{draft:'مسودة',sent:'مرسل',accepted:'مقبول',rejected:'مرفوض'}[q.status]||q.status)}</td><td style="white-space:nowrap">${btn}</td></tr>`;
   }).join('') : '<tr><td colspan="7" class="ldg">لا توجد عروض أسعار</td></tr>';
 }
 
@@ -2221,6 +2277,47 @@ async function showQtDetail(id){
 
 async function acceptQt(id){if(!confirm('قبول عرض السعر هذا؟'))return;const r=await $api('POST',`/api/procurement/quotations/${id}/accept`,{});if(!r?.success){toast(r?.error||'فشل','e');return;}toast('✅ تم قبول العرض');loadQts();}
 async function rejectQt(id){if(!confirm('رفض عرض السعر هذا؟'))return;const r=await $api('POST',`/api/procurement/quotations/${id}/reject`,{});if(!r?.success){toast(r?.error||'فشل','e');return;}toast('❌ تم رفض العرض');loadQts();}
+async function createPOFromQt(id){
+  if(!confirm('إنشاء أمر شراء من عرض السعر المختار؟'))return;
+  const r=await $api('POST',`/api/procurement/quotations/${id}/po`,{warehouse_id:document.getElementById('powh')?.value||null});
+  if(!r?.success){toast(r?.error||'فشل','e');return;}
+  toast('✅ تم إنشاء أمر الشراء','s');loadQts();loadPOs();
+}
+async function openQtAdd(){
+  const qtrfq=document.getElementById('qtrfq');qtrfq.innerHTML='<option value="">اختر</option>';
+  const r=await $api('GET','/api/procurement/rfq?status=sent&per_page=999');if(r?.success){(r.data?.rfqs||r.data||[]).forEach(rf=>{qtrfq.innerHTML+=`<option value="${rf.id}">${rf.ref_number}</option>`;});}
+  const sup=document.getElementById('qtsup');sup.innerHTML='<option value="">اختر</option>';
+  const sr=await $api('GET','/api/suppliers');if(sr?.success){(sr.data||[]).forEach(s=>{sup.innerHTML+=`<option value="${s.id}">${s.name}</option>`;});}
+  document.getElementById('qtitems').innerHTML='';addQtItemRow();document.getElementById('qtrfqinfo').textContent='';
+  document.getElementById('qtvalid').value='';document.getElementById('qtship').value='';document.getElementById('qtnt').value='';
+  clrErr(['eqtsup']);openM('qtadd');
+}
+function addQtItemRow(data){
+  const tb=document.getElementById('qtitems');const d=(data||[])[0]||{};
+  const tr=document.createElement('tr');tr.innerHTML=`<td><input class="qitm" value="${d.item_name||''}" placeholder="اسم الصنف" style="width:140px"></td><td><input class="qqty" type="number" value="${d.quantity||''}" placeholder="0" step="0.01" style="width:70px"></td><td><input class="qup" type="number" value="${d.unit_price||''}" placeholder="0" step="0.01" style="width:80px"></td><td class="qttl">${d.total?curSym()+fmtN(d.total):'—'}</td><td><button class="btn bxs bd" onclick="this.closest('tr').remove()">🗑️</button></td></tr>`;
+  tb.appendChild(tr);calcQtRow(tr);
+}
+function calcQtRow(tr){const qty=tr.querySelector('.qqty')?.value||0;const up=tr.querySelector('.qup')?.value||0;const ttl=tr.querySelector('.qttl');if(ttl)ttl.textContent=curSym()+fmtN(qty*up);}
+async function qtRFQChanged(){
+  const rfqId=document.getElementById('qtrfq').value;
+  const info=document.getElementById('qtrfqinfo');const tb=document.getElementById('qtitems');
+  tb.innerHTML='';info.textContent='';
+  if(!rfqId){addQtItemRow();return;}
+  info.textContent='جاري تحميل الأصناف...';
+  const r=await $api('GET',`/api/procurement/rfq/${rfqId}`);if(!r?.success){info.textContent='فشل';return;}
+  const rf=r.data;info.textContent=`طلب عرض: ${rf.ref_number} — ${rf.items?.length||0} صنف`;
+  tb.innerHTML='';
+  if(rf.items&&rf.items.length){rf.items.forEach(i=>addQtItemRow([{item_name:i.item_name,quantity:i.quantity,unit_price:''}]));}
+  else{addQtItemRow();}
+}
+async function subQt(){
+  const sup=document.getElementById('qtsup').value;if(!sup){shFe('eqtsup','اختر المورد');return;}clrErr(['eqtsup']);
+  const items=[];document.querySelectorAll('#qtitems tr').forEach(tr=>{const nm=tr.querySelector('.qitm')?.value;const qty=tr.querySelector('.qqty')?.value;const up=tr.querySelector('.qup')?.value;if(nm&&qty)items.push({item_name:nm,quantity:parseFloat(qty),unit_price:parseFloat(up||0)});});
+  if(!items.length){shAe('qterr','أضف صنفاً واحداً على الأقل');return;}
+  const r=await $api('POST','/api/procurement/quotations',{rfq_id:document.getElementById('qtrfq').value?parseInt(document.getElementById('qtrfq').value):null,supplier_id:parseInt(sup),valid_until:document.getElementById('qtvalid').value||null,shipping_cost:parseFloat(document.getElementById('qtship').value||0),notes:document.getElementById('qtnt').value.trim(),items});
+  if(!r?.success){shAe('qterr',r?.error||'فشل الحفظ');return;}
+  toast('✅ تم إضافة عرض السعر','s');closeM('qtadd');loadQts();
+}
 
 // ─── PURCHASE ORDERS ───
 let POpg=1,POstatus='';

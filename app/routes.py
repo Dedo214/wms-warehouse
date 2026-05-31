@@ -936,7 +936,7 @@ def generate_po_from_quotation(qid):
     if qt.status != "accepted": return err("يجب قبول عرض السعر أولاً")
     po = PurchaseOrder(ref_number=gen_ref("PO"), quotation_id=qt.id,
         supplier_id=qt.supplier_id, rfq_id=qt.rfq_id,
-        warehouse_id=None,
+        warehouse_id=request.get_json(silent=True) and request.get_json(silent=True).get("warehouse_id") or None,
         created_by=g.current_user.id, status="draft",
         notes=qt.notes, total_amount=qt.total)
     db.session.add(po); db.session.flush()
@@ -1721,6 +1721,9 @@ def create_rfq():
     db.session.add(rfq); db.session.flush()
     for sid in (data.get("supplier_ids") or []):
         db.session.add(RFQSupplier(rfq_id=rfq.id, supplier_id=int(sid)))
+    for it in (data.get("items") or []):
+        db.session.add(RFQItem(rfq_id=rfq.id, item_name=it.get("item_name",""),
+            quantity=float(it.get("quantity",0)), unit=it.get("unit",""), notes=it.get("notes","")))
     AuditService.log("create","rfq",rfq.id,f"إنشاء طلب عرض سعر: {ref}")
     db.session.commit()
     return created(rfq.to_dict())
@@ -1994,7 +1997,7 @@ def create_grn():
         total = round(accepted * unit_price, 2)
         total_value += total
         gi = GRNItem(grn_id=grn.id, po_item_id=it.get("po_item_id"),
-            item_name=it.get("item_name",""), ordered_qty=ordered,
+            item_id=it.get("item_id"), item_name=it.get("item_name",""), ordered_qty=ordered,
             received_qty=float(it.get("received_qty",ordered)),
             damaged_qty=damaged, rejected_qty=rejected,
             accepted_qty=accepted, unit_price=unit_price, total=total)
@@ -2004,6 +2007,17 @@ def create_grn():
         if not item_id and it.get("item_name"):
             item = Item.query.filter_by(name=it["item_name"]).first()
             if item: item_id = item.id
+        # persist item_id to GRNItem
+        if item_id: gi.item_id = item_id
+        # create StockMovement record for audit trail
+        if accepted > 0 and grn.warehouse_id and item_id:
+            from app.services import MovementService
+            try:
+                MovementService.create({"item_id":item_id,"warehouse_id":grn.warehouse_id,
+                    "quantity":accepted,"type":"in","reference":ref,"unit_price":unit_price,
+                    "notes":f"GRN: {ref}"}, g.current_user.id)
+            except Exception:
+                pass  # non-blocking
         # update stock for accepted items
         if accepted > 0 and grn.warehouse_id and item_id:
             stk = Stock.query.filter_by(item_id=item_id, warehouse_id=grn.warehouse_id).first()
@@ -2042,6 +2056,8 @@ def cancel_grn(gid):
         if it.item_id and grn.warehouse_id:
             stk = Stock.query.filter_by(item_id=it.item_id, warehouse_id=grn.warehouse_id).first()
             if stk: stk.quantity = max(0, stk.quantity - (it.accepted_qty or 0))
+            # reverse FIFO layers
+            InventoryLayer.consume(it.item_id, grn.warehouse_id, it.accepted_qty or 0)
     if grn.po:
         for poi in grn.po.items:
             poi.received_qty = max(0, (poi.received_qty or 0) - sum(gi.quantity for gi in grn.items if gi.po_item_id == poi.id))
