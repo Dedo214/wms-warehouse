@@ -446,8 +446,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
         <div class="fg"><label class="fl">الرابط الحالي</label><input type="text" id="apiedit" placeholder="http://192.168.1.X:5000"></div>
         <button class="btn bp" onclick="saveUrl();toast('تم حفظ الرابط','s')">💾 حفظ الرابط</button>
         <div class="div"></div>
-        <div class="ch"><div class="ct">💾 النسخ الاحتياطي</div></div>
-        <button class="btn bp" onclick="doBackup()">⬇️ تحميل النسخة الاحتياطية</button>
+        <div class="ch" style="margin-bottom:8px"><div class="ct">💾 النسخ الاحتياطي</div></div>
+        <div id="bckpnl">
+          <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="btn bp bsm" onclick="doBackup()">⬇️ تحميل JSON</button>
+            <button class="btn bs bsm" onclick="trigBackup()">📀 إنشاء نسخة DB</button>
+            <button class="btn bo bsm" onclick="loadBkList()">📂 عرض النسخ</button>
+          </div>
+          <div id="bckcfg" style="margin-bottom:8px;font-size:12px;color:var(--mut)">جاري تحميل الإعدادات...</div>
+          <div id="bckcfgform" style="display:none;margin-bottom:8px;padding:8px;background:var(--bgl);border-radius:7px">
+            <div class="fr2">
+              <div class="fg"><label class="fl" style="font-size:11px">التشغيل التلقائي</label><select id="bcen" style="font-size:12px"><option value="true">✅ مفعل</option><option value="false">❌ معطل</option></select></div>
+              <div class="fg"><label class="fl" style="font-size:11px">كل (ساعة)</label><input type="number" id="bcint" value="24" min="1" style="font-size:12px"></div>
+              <div class="fg"><label class="fl" style="font-size:11px">الاحتفاظ بـ (نسخة)</label><input type="number" id="bckeep" value="10" min="1" style="font-size:12px"></div>
+            </div>
+            <button class="btn bs bsm" onclick="saveBkCfg()">💾 حفظ الإعدادات</button>
+          </div>
+          <div id="bcklst" style="font-size:12px"></div>
+        </div>
         <div class="div"></div>
         <div class="ch"><div class="ct">📊 إحصائيات</div></div>
         <div id="dbst" style="font-size:13px;line-height:2;color:var(--mut)">—</div>
@@ -1095,7 +1111,7 @@ function goP(p){
   document.getElementById('page-'+p)?.classList.add('on');
   document.querySelector(`.ni[data-p="${p}"]`)?.classList.add('on');
   document.getElementById('pgtl').textContent=PT[p]||p;
-  const fns={dash:loadDash,inv:loadInv,movs:loadMovs,trans:()=>loadTrans(''),cnt:loadCnt,stkq:loadStkInq,sup:loadSup,proj:loadProj,usrs:loadUsrs,audit:()=>loadAudit(1),cfg:()=>{loadDbStats();loadSettings();loadWhMgmt();loadCatMgmt();loadProjMgmt();},rep:()=>{if(!document.getElementById('repdf')?.value||!document.getElementById('repdt')?.value)setRepPeriod(30);currentRepId='bal';REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r==='bal'?'block':'none';});document.getElementById('repdatebar').style.display='none';loadBalRep();loadRepKpis();},purch:loadPurDash,prrq:()=>loadPRs(),rfqs:()=>loadRFQs(),quotas:()=>loadQts(),pord:()=>loadPOs(),grns:()=>loadGRNs(),pret:()=>loadReturns(),peval:()=>loadEvals(),prep:()=>{if(!document.getElementById('prepdf')?.value||!document.getElementById('prepdt')?.value)setPP('p',30);loadPurRep();}};
+  const fns={dash:loadDash,inv:loadInv,movs:loadMovs,trans:()=>loadTrans(''),cnt:loadCnt,stkq:loadStkInq,sup:loadSup,proj:loadProj,usrs:loadUsrs,audit:()=>loadAudit(1),  cfg:()=>{loadDbStats();loadSettings();loadWhMgmt();loadCatMgmt();loadProjMgmt();loadBkCfg();},rep:()=>{if(!document.getElementById('repdf')?.value||!document.getElementById('repdt')?.value)setRepPeriod(30);currentRepId='bal';REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r==='bal'?'block':'none';});document.getElementById('repdatebar').style.display='none';loadBalRep();loadRepKpis();},purch:loadPurDash,prrq:()=>loadPRs(),rfqs:()=>loadRFQs(),quotas:()=>loadQts(),pord:()=>loadPOs(),grns:()=>loadGRNs(),pret:()=>loadReturns(),peval:()=>loadEvals(),prep:()=>{if(!document.getElementById('prepdf')?.value||!document.getElementById('prepdt')?.value)setPP('p',30);loadPurRep();}};
   if(fns[p]) fns[p]();
   // expand parent section if collapsed
   const nav=document.querySelector(`.ni[data-p="${p}"]`);
@@ -1742,6 +1758,44 @@ async function rdAll(){await $api('POST','/api/notifications/read-all');document
 async function expXL(type){try{const res=await fetch(`${API}/api/export/excel?type=${type}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;a.click();URL.revokeObjectURL(a.href);toast('تم تصدير الملف ✅','s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function expFile(fmt,type){try{const res=await fetch(`${API}/api/export/${fmt}?type=${type}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التصدير','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`warehouse_${type}_${new Date().toISOString().slice(0,10)}.${fmt}`;a.click();URL.revokeObjectURL(a.href);toast(`تم تصدير ${fmt.toUpperCase()} ✅`,'s');}catch(e){toast('خطأ: '+e.message,'e');}}
 async function doBackup(){try{const res=await fetch(`${API}/api/backup`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل النسخ الاحتياطي','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`wms_backup_${new Date().toISOString().slice(0,10)}.json`;a.click();toast('تم تحميل النسخة الاحتياطية','s');}catch(e){toast('خطأ: '+e.message,'e');}}
+async function loadBkCfg(){
+  document.getElementById('bckcfg').textContent='جاري التحميل...';
+  const r=await $api('GET','/api/settings/backup');if(!r?.success){document.getElementById('bckcfg').textContent='فشل تحميل الإعدادات';return;}
+  const cfg={};for(const c of r.data)cfg[c.key]=c.value;
+  document.getElementById('bckcfg').innerHTML=`<span>آخر نسخة: <strong>${cfg.last_backup||'—'}</strong></span>`;
+  const frm=document.getElementById('bckcfgform');
+  frm.style.display='block';
+  const en=document.getElementById('bcen');en.value=cfg.auto_backup_enabled||'false';
+  const int=document.getElementById('bcint');int.value=cfg.backup_interval_hours||24;
+  const kp=document.getElementById('bckeep');kp.value=cfg.backup_keep_count||10;
+}
+async function saveBkCfg(){
+  const body={auto_backup_enabled:document.getElementById('bcen').value,backup_interval_hours:document.getElementById('bcint').value,backup_keep_count:document.getElementById('bckeep').value};
+  const r=await $api('POST','/api/settings/backup',body);if(!r?.success){toast(r?.error||'فشل الحفظ','e');return;}
+  toast('✅ تم حفظ الإعدادات','s');
+}
+async function trigBackup(){
+  if(!confirm('إنشاء نسخة احتياطية جديدة من قاعدة البيانات؟'))return;
+  const r=await $api('POST','/api/backup/trigger',{});if(!r?.success){toast(r?.error||'فشل إنشاء النسخة','e');return;}
+  toast(r.message||'✅ تم إنشاء النسخة','s');loadBkCfg();loadBkList();
+}
+async function loadBkList(){
+  const el=document.getElementById('bcklst');
+  el.innerHTML='<span class="sp2"></span> جاري التحميل...';
+  const r=await $api('GET','/api/backups');if(!r?.success){el.innerHTML='<span style="color:var(--rl)">فشل تحميل قائمة النسخ</span>';return;}
+  const items=r.data||[];
+  if(!items.length){el.innerHTML='<span style="color:var(--mut)">لا توجد نسخ احتياطية</span>';return;}
+  el.innerHTML=items.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 6px;border-bottom:1px solid var(--bdr)"><span class="tn">${b.name}</span><span style="color:var(--mut);font-size:11px">${b.size_label||''} • ${b.created||''}</span><span><button class="btn bxs bo" onclick="dlBackup('${b.name}')">⬇️</button><button class="btn bxs bd" onclick="rstBackup('${b.name}')">🔄</button></span></div>`).join('');
+}
+async function dlBackup(name){
+  try{const res=await fetch(`${API}/api/backups/${encodeURIComponent(name)}`,{headers:{Authorization:`Bearer ${TOKEN}`}});if(!res.ok){toast('فشل التحميل','e');return;}const blob=await res.blob(),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href);toast('✅ تم التحميل','s');}catch(e){toast('خطأ: '+e.message,'e');}
+}
+async function rstBackup(name){
+  if(!confirm(`⚠️ استعادة النسخة "${name}"؟\nسيتم استبدال قاعدة البيانات الحالية بالكامل.`))return;
+  if(!confirm('تأكيد: هل أنت متأكد؟ سيتم فقدان أي تغييرات غير محفوظة!'))return;
+  const r=await $api('POST','/api/backup/restore',{name});if(!r?.success){toast(r?.error||'فشل الاستعادة','e');return;}
+  toast('✅ تمت استعادة قاعدة البيانات. الرجاء إعادة تحميل الصفحة.','s');setTimeout(()=>location.reload(),2000);
+}
 function printPage(title, tbodyId){
   const tbody=document.getElementById(tbodyId);
   if(!tbody||!tbody.rows.length){toast('لا توجد بيانات للطباعة','w');return;}
