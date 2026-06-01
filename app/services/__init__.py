@@ -2,8 +2,9 @@
 ط·ط¨ظ‚ط© ط§ظ„ط®ط¯ظ…ط§طھ â€” Business Logic Services
 ظƒظ„ ط§ظ„ظ…ظ†ط·ظ‚ ط§ظ„طھط¬ط§ط±ظٹ ظ…ط¹ط²ظˆظ„ ظ‡ظ†ط§ ط¨ط¹ظٹط¯ط§ظ‹ ط¹ظ† ط§ظ„ظ€ routes
 """
-import datetime, json, calendar
-from sqlalchemy import func
+import datetime, json
+from sqlalchemy import func, cast, Date
+from sqlalchemy.orm import joinedload
 from flask import request, current_app
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from app.models import (db, User, Warehouse, Category, Supplier, Item,
@@ -154,80 +155,108 @@ class DashboardService:
     @staticmethod
     def get_data(user_id):
         today = datetime.datetime.utcnow().date()
-        whs   = Warehouse.query.filter_by(is_active=True).all()
-        items = Item.query.filter_by(is_active=True).all()
+        thirty_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        six_months_ago = today.replace(day=1) - datetime.timedelta(days=180)
 
-        today_movs = StockMovement.query.filter(
-            func.date(StockMovement.created_at) == today
-        ).all()
+        whs = Warehouse.query.filter_by(is_active=True).all()
+        wh_ids = [w.id for w in whs]
 
-        total_value    = 0.0
+        # ── Items with stocks eager-loaded (single query) ──
+        items = Item.query.options(joinedload(Item.stocks)).filter_by(is_active=True).all()
+
+        # ── Warehouse item counts (single grouped query) ──
+        wh_item_counts = {r[0]: r[1] for r in db.session.query(
+            Stock.warehouse_id, func.count(Stock.id)
+        ).filter(Stock.warehouse_id.in_(wh_ids), Stock.quantity > 0
+        ).group_by(Stock.warehouse_id).all()}
+
+        # ── Today's movements grouped by warehouse + type (single query) ──
+        today_rows = db.session.query(
+            StockMovement.warehouse_id, StockMovement.type,
+            func.sum(StockMovement.quantity).label("qty")
+        ).filter(cast(StockMovement.created_at, Date) == today
+        ).group_by(StockMovement.warehouse_id, StockMovement.type).all()
+        today_by_wh = {}
+        for r in today_rows:
+            today_by_wh.setdefault(r.warehouse_id, {"in": 0, "out": 0})
+            today_by_wh[r.warehouse_id][r.type] = today_by_wh[r.warehouse_id].get(r.type, 0) + float(r.qty)
+
+        total_today_in = sum(v.get("in", 0) for v in today_by_wh.values())
+        total_today_out = sum(v.get("out", 0) for v in today_by_wh.values())
+
+        # ── Compute item data in-memory (no extra queries) ──
+        total_value = 0.0
         critical_items = []
+        item_values = []  # (item, total_stock) for top-items sort
         for item in items:
-            total = item.get_total_stock()
+            total = sum(s.quantity for s in item.stocks)
             total_value += total * item.unit_price
-            st = item.get_status()
-            if st in ("critical", "warning"):
-                critical_items.append({
-                    "id":item.id,"name":item.name,"total":total,
-                    "min":item.min_quantity,"unit":item.unit,"status":st,
-                })
+            item_values.append((item, total))
+            if item.min_quantity > 0:
+                if total <= item.min_quantity:
+                    critical_items.append({"id": item.id, "name": item.name, "total": total,
+                                           "min": item.min_quantity, "unit": item.unit, "status": "critical"})
+                elif total <= item.min_quantity * 1.3:
+                    critical_items.append({"id": item.id, "name": item.name, "total": total,
+                                           "min": item.min_quantity, "unit": item.unit, "status": "warning"})
 
+        # ── Warehouse stats ──
         wh_stats = []
         for wh in whs:
-            ic = db.session.query(func.count(Stock.id)).filter(
-                Stock.warehouse_id == wh.id, Stock.quantity > 0
-            ).scalar() or 0
-            wm = [m for m in today_movs if m.warehouse_id == wh.id]
-            wh_stats.append({
-                "id":wh.id,"name":wh.name,"type":wh.type,
-                "location":wh.location,"item_count":ic,"capacity":wh.capacity,
-                "today_in": sum(m.quantity for m in wm if m.type=="in"),
-                "today_out":sum(m.quantity for m in wm if m.type=="out"),
-            })
+            td = today_by_wh.get(wh.id, {})
+            wh_stats.append({"id": wh.id, "name": wh.name, "type": wh.type,
+                             "location": wh.location, "capacity": wh.capacity,
+                             "item_count": wh_item_counts.get(wh.id, 0),
+                             "today_in": td.get("in", 0), "today_out": td.get("out", 0)})
 
-        # 7-day chart
+        # ── 7-day chart (single grouped query) ──
+        day_names = ["الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"]
+        week_ago = today - datetime.timedelta(days=7)
+        chart_rows = db.session.query(
+            cast(StockMovement.created_at, Date).label("d"),
+            StockMovement.type,
+            func.sum(StockMovement.quantity).label("qty")
+        ).filter(cast(StockMovement.created_at, Date) >= week_ago,
+                 cast(StockMovement.created_at, Date) <= today
+        ).group_by(cast(StockMovement.created_at, Date), StockMovement.type).all()
+        chart_map = {}
+        for r in chart_rows:
+            chart_map.setdefault(str(r.d), {})[r.type] = float(r.qty)
         chart = []
-        day_names = ["ط§ظ„ط¥ط«ظ†ظٹظ†","ط§ظ„ط«ظ„ط§ط«ط§ط،","ط§ظ„ط£ط±ط¨ط¹ط§ط،","ط§ظ„ط®ظ…ظٹط³","ط§ظ„ط¬ظ…ط¹ط©","ط§ظ„ط³ط¨طھ","ط§ظ„ط£ط­ط¯"]
         for i in range(6, -1, -1):
-            d  = (datetime.datetime.utcnow() - datetime.timedelta(days=i)).date()
-            dm = StockMovement.query.filter(func.date(StockMovement.created_at)==d).all()
-            chart.append({
-                "date": day_names[d.weekday()],
-                "in":   sum(m.quantity for m in dm if m.type=="in"),
-                "out":  sum(m.quantity for m in dm if m.type=="out"),
-            })
+            d = today - datetime.timedelta(days=i)
+            row = chart_map.get(str(d), {})
+            chart.append({"date": day_names[d.weekday()],
+                          "in": row.get("in", 0), "out": row.get("out", 0)})
 
-        recent   = StockMovement.query.order_by(StockMovement.created_at.desc()).limit(10).all()
-        pending  = Transfer.query.filter_by(status="pending").count()
-        unread   = Notification.query.filter_by(user_id=user_id, is_read=False).count()
+        # ── Small counts (single queries each, but cheap) ──
+        recent = StockMovement.query.order_by(StockMovement.created_at.desc()).limit(10).all()
+        pending = Transfer.query.filter_by(status="pending").count()
+        unread = Notification.query.filter_by(user_id=user_id, is_read=False).count()
 
         pending_prs = PurchaseRequest.query.filter_by(status="pending").count()
         pending_pos = PurchaseOrder.query.filter_by(status="draft").count()
-        sent_pos    = PurchaseOrder.query.filter_by(status="sent").count()
-        pending_grns = GoodsReceipt.query.count()
+        sent_pos = PurchaseOrder.query.filter_by(status="sent").count()
         month_start = today.replace(day=1)
-        month_pos   = PurchaseOrder.query.filter(PurchaseOrder.created_at >= month_start).count()
+        month_pos = PurchaseOrder.query.filter(PurchaseOrder.created_at >= month_start).count()
         month_po_value = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
             PurchaseOrder.created_at >= month_start).scalar() or 0
 
-        # Turnover rate: total out value (30d) / avg inventory value
-        thirty_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        # ── Turnover ──
         out_val_30d = db.session.query(func.sum(StockMovement.quantity * StockMovement.unit_price)).filter(
-            StockMovement.type.in_(["out","damage"]),
+            StockMovement.type.in_(["out", "damage"]),
             StockMovement.created_at >= thirty_ago).scalar() or 0
         turnover_rate = round(float(out_val_30d) / total_value, 2) if total_value > 0 else 0
         avg_storage_days = 30 / turnover_rate if turnover_rate > 0 else 0
 
-        # Top items by stock value
-        top_items = []
-        for it in sorted(items, key=lambda x: x.get_total_stock() * x.unit_price, reverse=True)[:10]:
-            s = it.get_total_stock()
-            top_items.append({"id":it.id,"name":it.name,"code":it.code,"unit":it.unit,
-                              "total_stock":s,"unit_price":it.unit_price,
-                              "total_value":round(s * it.unit_price, 2)})
+        # ── Top 10 items (in-memory, stocks already loaded) ──
+        item_values.sort(key=lambda x: x[1] * x[0].unit_price, reverse=True)
+        top_items = [{"id": it.id, "name": it.name, "code": it.code, "unit": it.unit,
+                      "total_stock": s, "unit_price": it.unit_price,
+                      "total_value": round(s * it.unit_price, 2)}
+                     for it, s in item_values[:10]]
 
-        # Top suppliers
+        # ── Top suppliers ──
         top_suppliers = db.session.query(
             Supplier.id, Supplier.name,
             func.count(PurchaseOrder.id).label("po_count"),
@@ -236,56 +265,65 @@ class DashboardService:
         ).group_by(Supplier.id
         ).order_by(func.sum(PurchaseOrder.total_amount).desc().nullslast()
         ).limit(5).all()
-        supplier_data = [{"id":s[0],"name":s[1],"po_count":s[2],"total_amount":float(s[3] or 0)} for s in top_suppliers]
+        supplier_data = [{"id": s[0], "name": s[1], "po_count": s[2],
+                          "total_amount": float(s[3] or 0)} for s in top_suppliers]
 
-        # Monthly procurement chart (last 6 months)
+        # ── 6-month procurement chart (single grouped query) ──
+        month_names = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                       "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+        po_rows = db.session.query(
+            func.strftime("%Y-%m", PurchaseOrder.created_at).label("ym"),
+            func.sum(PurchaseOrder.total_amount).label("val")
+        ).filter(PurchaseOrder.created_at >= six_months_ago
+        ).group_by("ym").order_by("ym").all()
+        po_map = {r.ym: float(r.val) for r in po_rows}
         po_chart = []
-        month_names = ["ظٹظ†ط§ظٹط±","ظپط¨ط±ط§ظٹط±","ظ…ط§ط±ط³","ط£ط¨ط±ظٹظ„","ظ…ط§ظٹظˆ","ظٹظˆظ†ظٹظˆ","ظٹظˆظ„ظٹظˆ","ط£ط؛ط³ط·ط³","ط³ط¨طھظ…ط¨ط±","ط£ظƒطھظˆط¨ط±","ظ†ظˆظپظ…ط¨ط±","ط¯ظٹط³ظ…ط¨ط±"]
         for i in range(5, -1, -1):
-            m = (today.replace(day=1) - datetime.timedelta(days=30*i)).replace(day=1)
-            _, days_in_month = calendar.monthrange(m.year, m.month)
-            m_end = m.replace(day=days_in_month)
-            total = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
-                PurchaseOrder.created_at >= m, PurchaseOrder.created_at <= m_end).scalar() or 0
-            po_chart.append({"month": month_names[m.month-1], "value": round(float(total), 2)})
+            m = (today.replace(day=1) - datetime.timedelta(days=30 * i)).replace(day=1)
+            ym = m.strftime("%Y-%m")
+            po_chart.append({"month": month_names[m.month - 1], "value": round(po_map.get(ym, 0), 2)})
 
-        # Consumption trend (last 6 months)
+        # ── 6-month consumption chart (single grouped query) ──
+        cons_rows = db.session.query(
+            func.strftime("%Y-%m", StockMovement.created_at).label("ym"),
+            func.sum(StockMovement.quantity).label("val")
+        ).filter(
+            StockMovement.type.in_(["out", "transfer", "damage"]),
+            StockMovement.created_at >= six_months_ago
+        ).group_by("ym").order_by("ym").all()
+        cons_map = {r.ym: float(r.val) for r in cons_rows}
         cons_chart = []
         for i in range(5, -1, -1):
-            m = (today.replace(day=1) - datetime.timedelta(days=30*i)).replace(day=1)
-            _, days_in_month = calendar.monthrange(m.year, m.month)
-            m_end = m.replace(day=days_in_month)
-            total = db.session.query(func.sum(StockMovement.quantity)).filter(
-                StockMovement.type.in_(["out","transfer","damage"]),
-                StockMovement.created_at >= m, StockMovement.created_at <= m_end).scalar() or 0
-            cons_chart.append({"month": month_names[m.month-1], "value": round(float(total), 2)})
+            m = (today.replace(day=1) - datetime.timedelta(days=30 * i)).replace(day=1)
+            ym = m.strftime("%Y-%m")
+            cons_chart.append({"month": month_names[m.month - 1], "value": round(cons_map.get(ym, 0), 2)})
 
         return {
             "kpis": {
-                "total_items":       len(items),
-                "total_value":       round(total_value, 2),
-                "critical_count":    sum(1 for x in critical_items if x["status"]=="critical"),
-                "warning_count":     sum(1 for x in critical_items if x["status"]=="warning"),
+                "total_items": len(items),
+                "total_value": round(total_value, 2),
+                "critical_count": sum(1 for x in critical_items if x["status"] == "critical"),
+                "warning_count": sum(1 for x in critical_items if x["status"] == "warning"),
                 "pending_transfers": pending,
-                "today_in":          sum(m.quantity for m in today_movs if m.type=="in"),
-                "today_out":         sum(m.quantity for m in today_movs if m.type=="out"),
-                "total_movements":   StockMovement.query.count(),
-                "pending_prs":       pending_prs,
-                "pending_pos":       pending_pos,
-                "sent_pos":          sent_pos,
-                "month_pos":         month_pos,
-                "month_po_value":    round(month_po_value, 2),
-                "turnover_rate":     turnover_rate,
-                "avg_storage_days":  round(avg_storage_days, 1),
+                "today_in": total_today_in,
+                "today_out": total_today_out,
+                "total_movements": StockMovement.query.count(),
+                "pending_prs": pending_prs,
+                "pending_pos": pending_pos,
+                "sent_pos": sent_pos,
+                "month_pos": month_pos,
+                "month_po_value": round(month_po_value, 2),
+                "turnover_rate": turnover_rate,
+                "avg_storage_days": round(avg_storage_days, 1),
             },
-            "warehouses":           wh_stats,
-            "critical_items":       critical_items,
-            "recent_movements":     [m.to_dict() for m in recent],
-            "chart_data":           chart,
-            "po_chart":             po_chart,
-            "cons_chart":           cons_chart,
-            "top_items":            top_items,
-            "top_suppliers":        supplier_data,
+            "warehouses": wh_stats,
+            "critical_items": critical_items,
+            "recent_movements": [m.to_dict() for m in recent],
+            "chart_data": chart,
+            "po_chart": po_chart,
+            "cons_chart": cons_chart,
+            "top_items": top_items,
+            "top_suppliers": supplier_data,
             "unread_notifications": unread,
         }
 
