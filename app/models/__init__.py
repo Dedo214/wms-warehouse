@@ -114,6 +114,7 @@ class Item(db.Model):
     reorder_point = db.Column(db.Float, default=0.0)
     unit_price    = db.Column(db.Float, default=0.0)
     description   = db.Column(db.Text)
+    image_url     = db.Column(db.String(500))
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     category  = db.relationship("Category", back_populates="items")
@@ -139,7 +140,7 @@ class Item(db.Model):
              "category_icon":self.category.icon if self.category else "📦",
              "unit":self.unit,"min_quantity":self.min_quantity,
              "reorder_point":self.reorder_point,"unit_price":self.unit_price,
-             "description":self.description,"is_active":self.is_active,
+              "description":self.description,"image_url":self.image_url,"is_active":self.is_active,
              "created_at":self.created_at.isoformat()}
         if include_stock:
             whs = Warehouse.query.filter_by(is_active=True).all()
@@ -191,6 +192,7 @@ class StockMovement(db.Model):
     notes               = db.Column(db.Text)
     project             = db.Column(db.String(200))
     engineer_name       = db.Column(db.String(200))
+    lot_number          = db.Column(db.String(100))
     created_at          = db.Column(db.DateTime, default=datetime.datetime.utcnow, index=True)
     item             = db.relationship("Item", foreign_keys=[item_id], back_populates="movements")
     warehouse        = db.relationship("Warehouse", foreign_keys=[warehouse_id])
@@ -214,6 +216,7 @@ class StockMovement(db.Model):
                 "user_name":self.user.name if self.user else "",
                 "notes":self.notes,"project":self.project,
                 "engineer_name":self.engineer_name or "",
+                "lot_number":self.lot_number or "",
                 "created_at":self.created_at.isoformat(),
                 "created_date":self.created_at.strftime("%d/%m/%Y"),
                 "created_time":self.created_at.strftime("%H:%M")}
@@ -233,6 +236,8 @@ class Transfer(db.Model):
     approved_at       = db.Column(db.DateTime)
     reject_reason     = db.Column(db.Text)
     movement_id       = db.Column(db.Integer, db.ForeignKey("stock_movements.id"))
+    approval_chain_id = db.Column(db.Integer, db.ForeignKey("approval_chains.id"))
+    current_step      = db.Column(db.Integer, default=0)
     created_at        = db.Column(db.DateTime, default=datetime.datetime.utcnow, index=True)
     item      = db.relationship("Item", foreign_keys=[item_id], back_populates="transfers")
     from_wh   = db.relationship("Warehouse", foreign_keys=[from_warehouse_id])
@@ -241,6 +246,7 @@ class Transfer(db.Model):
     approver  = db.relationship("User", foreign_keys=[approved_by])
     STATUS_LABELS = {"pending":"معلق","executed":"منفذ","rejected":"مرفوض"}
     def to_dict(self):
+        chain = ApprovalChain.query.get(self.approval_chain_id) if self.approval_chain_id else None
         return {"id":self.id,"ref_number":self.ref_number,
                 "item_id":self.item_id,"item_name":self.item.name if self.item else "",
                 "item_unit":self.item.unit if self.item else "",
@@ -254,6 +260,9 @@ class Transfer(db.Model):
                 "approver_name":self.approver.name if self.approver else "",
                 "approved_at":self.approved_at.isoformat() if self.approved_at else None,
                 "reject_reason":self.reject_reason,
+                "approval_chain_id":self.approval_chain_id,
+                "current_step":self.current_step or 0,
+                "chain_steps":[s.to_dict() for s in chain.steps] if chain else [],
                 "created_at":self.created_at.isoformat(),
                 "created_date":self.created_at.strftime("%d/%m/%Y")}
 
@@ -450,7 +459,23 @@ class ProjectInvoice(db.Model):
                 "status_label":{"pending":"قيد الانتظار","approved":"معتمد","paid":"مدفوع","cancelled":"ملغي"}.get(self.status,self.status)}
 
 
-
+class ScheduledCount(db.Model):
+    __tablename__ = "scheduled_counts"
+    id           = db.Column(db.Integer, primary_key=True)
+    warehouse_id = db.Column(db.Integer, db.ForeignKey("warehouses.id"))
+    frequency    = db.Column(db.String(20), default="monthly")  # weekly, monthly, quarterly
+    day_of_month = db.Column(db.Integer, default=1)
+    day_of_week  = db.Column(db.Integer, default=0)  # 0=Monday
+    is_active    = db.Column(db.Boolean, default=True)
+    created_at   = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    last_created = db.Column(db.DateTime)
+    warehouse = db.relationship("Warehouse")
+    def to_dict(self):
+        return {"id":self.id,"warehouse_id":self.warehouse_id,
+                "warehouse_name":self.warehouse.name if self.warehouse else "",
+                "frequency":self.frequency,"day_of_month":self.day_of_month,
+                "day_of_week":self.day_of_week,"is_active":self.is_active,
+                "last_created":self.last_created.isoformat() if self.last_created else None}
 class PurchaseRequest(db.Model):
     __tablename__ = "purchase_requests"
     id           = db.Column(db.Integer, primary_key=True)
@@ -462,8 +487,10 @@ class PurchaseRequest(db.Model):
     priority     = db.Column(db.String(20), default="medium")
     required_date= db.Column(db.Date, nullable=True)
     notes        = db.Column(db.Text)
-    status       = db.Column(db.String(20), default="draft")
-    created_at   = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status        = db.Column(db.String(20), default="draft")
+    approval_chain_id = db.Column(db.Integer, db.ForeignKey("approval_chains.id"))
+    current_step      = db.Column(db.Integer, default=0)
+    created_at    = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     requester = db.relationship("User", foreign_keys=[requester_id])
     project   = db.relationship("Project", foreign_keys=[project_id])
     items     = db.relationship("PRItem", back_populates="pr", cascade="all,delete-orphan")
@@ -662,6 +689,8 @@ class PurchaseOrder(db.Model):
     payment_terms = db.Column(db.String(200))
     notes         = db.Column(db.Text)
     status        = db.Column(db.String(20), default="draft")
+    approval_chain_id = db.Column(db.Integer, db.ForeignKey("approval_chains.id"), nullable=True)
+    current_step      = db.Column(db.Integer, default=0)
     created_at    = db.Column(db.DateTime, default=datetime.datetime.utcnow)
     quotation = db.relationship("Quotation", foreign_keys=[quotation_id])
     supplier  = db.relationship("Supplier", foreign_keys=[supplier_id])
@@ -673,6 +702,10 @@ class PurchaseOrder(db.Model):
     STATUS_LABELS = {"draft":"مسودة","approved":"معتمد","sent":"مرسل","partial":"استلام جزئي","completed":"مكتمل","cancelled":"ملغي"}
     def to_dict(self):
         items_total = sum((i.total or 0) for i in self.items)
+        chain_steps = []
+        if self.approval_chain_id:
+            chain = ApprovalChain.query.get(self.approval_chain_id)
+            if chain: chain_steps = [s.to_dict() for s in chain.steps]
         return {"id":self.id,"ref_number":self.ref_number,
                 "quotation_id":self.quotation_id,
                 "quotation_ref":self.quotation.ref_number if self.quotation else "",
@@ -690,6 +723,9 @@ class PurchaseOrder(db.Model):
                 "currency":self.currency,"payment_terms":self.payment_terms or "",
                 "notes":self.notes or "","status":self.status,
                 "status_label":self.STATUS_LABELS.get(self.status,self.status),
+                "approval_chain_id":self.approval_chain_id,
+                "current_step":self.current_step or 0,
+                "chain_steps":chain_steps,
                 "items":[i.to_dict() for i in self.items],
                 "created_at":self.created_at.isoformat()}
 
@@ -922,3 +958,64 @@ class InventoryLayer(db.Model):
                 "warehouse_id": self.warehouse_id, "quantity": self.quantity, "unit_cost": self.unit_cost,
                 "remaining_value": self.remaining_value(), "ref_type": self.ref_type, "ref_id": self.ref_id,
                 "created_at": self.created_at.isoformat()}
+
+    @classmethod
+    def cleanup_layers(cls):
+        return cls.query.filter(cls.quantity == 0).delete()
+
+
+class Lot(db.Model):
+    __tablename__ = "lots"
+    id          = db.Column(db.Integer, primary_key=True)
+    item_id     = db.Column(db.Integer, db.ForeignKey("items.id"), nullable=False, index=True)
+    lot_number  = db.Column(db.String(100), nullable=False)
+    expiry_date = db.Column(db.DateTime, nullable=True)
+    status      = db.Column(db.String(20), default="active")
+    created_at  = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    item        = db.relationship("Item")
+    __table_args__ = (db.UniqueConstraint("item_id", "lot_number", name="uq_lot"),)
+    def to_dict(self):
+        return {"id":self.id,"item_id":self.item_id,"item_name":self.item.name if self.item else "",
+                "lot_number":self.lot_number,
+                "expiry_date":self.expiry_date.strftime("%Y-%m-%d") if self.expiry_date else None,
+                "status":self.status,
+                "created_at":self.created_at.isoformat() if self.created_at else ""}
+
+
+class UnitConversion(db.Model):
+    __tablename__ = "unit_conversions"
+    id        = db.Column(db.Integer, primary_key=True)
+    from_unit = db.Column(db.String(30), nullable=False)
+    to_unit   = db.Column(db.String(30), nullable=False)
+    factor    = db.Column(db.Float, nullable=False, default=1)
+    __table_args__ = (db.UniqueConstraint("from_unit", "to_unit", name="uq_conv"),)
+    def to_dict(self):
+        return {"id":self.id,"from_unit":self.from_unit,"to_unit":self.to_unit,"factor":self.factor}
+
+
+class ApprovalChain(db.Model):
+    __tablename__ = "approval_chains"
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(100), nullable=False)
+    target_type = db.Column(db.String(30), nullable=False)
+    is_active   = db.Column(db.Boolean, default=True)
+    created_at  = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    steps       = db.relationship("ApprovalStep", backref="chain", lazy="joined", order_by="ApprovalStep.step_order",
+                                  cascade="all, delete-orphan")
+    def to_dict(self):
+        return {"id":self.id,"name":self.name,"target_type":self.target_type,
+                "is_active":self.is_active,"steps":[s.to_dict() for s in self.steps]}
+
+
+class ApprovalStep(db.Model):
+    __tablename__ = "approval_steps"
+    id          = db.Column(db.Integer, primary_key=True)
+    chain_id    = db.Column(db.Integer, db.ForeignKey("approval_chains.id"), nullable=False)
+    step_order  = db.Column(db.Integer, nullable=False)
+    role        = db.Column(db.String(30), nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approval_type = db.Column(db.String(10), default="any")
+    user        = db.relationship("User")
+    def to_dict(self):
+        return {"id":self.id,"chain_id":self.chain_id,"step_order":self.step_order,
+                "role":self.role,"user_id":self.user_id,"approval_type":self.approval_type}

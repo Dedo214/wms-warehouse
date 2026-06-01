@@ -14,7 +14,7 @@ from werkzeug.utils import secure_filename
 from app.models import (
     db, User, Warehouse, Category,     Supplier, Item,
     Stock, StockMovement, Transfer, InventoryCount,
-    InventoryCountLine, Notification, AuditLog, Project,
+    InventoryCountLine, Notification, Project,
     ItemAttachment, NotificationConfig, BackupConfig,
     ProjectInvoice,
     PurchaseRequest, PRItem, ApprovalLog,
@@ -23,15 +23,42 @@ from app.models import (
     GoodsReceipt, GRNItem,
     PurchaseReturn, PReturnItem,
     SupplierEvaluation, SupplierProfile, InventoryLayer,
+    Lot, UnitConversion, ApprovalChain, ApprovalStep, ScheduledCount,
 )
+
+def send_notif_email(subject, body, to=None):
+    try:
+        host = NotificationConfig.query.filter_by(key="smtp_host").first()
+        port = NotificationConfig.query.filter_by(key="smtp_port").first()
+        user = NotificationConfig.query.filter_by(key="smtp_user").first()
+        pwd  = NotificationConfig.query.filter_by(key="smtp_pass").first()
+        frm  = NotificationConfig.query.filter_by(key="email_from").first()
+        enb  = NotificationConfig.query.filter_by(key="email_enabled").first()
+        if not host or not host.value or (enb and enb.value != "true"): return
+        recipients = [to] if to else [u.email for u in User.query.filter(User.role.in_(["admin","super_admin"])).all() if u.email]
+        for r in recipients:
+            try:
+                msg = MIMEMultipart()
+                msg["From"] = frm.value if frm else user.value if user else "noreply@wms.local"
+                msg["To"] = r; msg["Subject"] = subject
+                msg.attach(MIMEText(body, "plain", "utf-8"))
+                with smtplib.SMTP(host.value, int(port.value if port else 587), timeout=10) as s:
+                    s.starttls()
+                    if user and user.value and pwd and pwd.value: s.login(user.value, pwd.value)
+                    s.send_message(msg)
+            except: pass
+    except: pass
+
+def _uname(uid): u = User.query.get(uid); return u.name if u else "—"
+
 from app.services import (
     AuthService, DashboardService, ItemService,
     MovementService, TransferService, CountService,
     SupplierService, UserService, ReportService,
-    AuditService, NotificationService,
+    AuditService,
     StockInquiryService,
 )
-from app.utils import ok, created, err, not_found, forbidden, unauthorized, require_role, validate, paginate, gen_ref, parse_date, today_str
+from app.utils import ok, created, err, not_found, forbidden, unauthorized, require_role, validate, gen_ref, parse_date, today_str
 from app.limiter import limiter
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -284,6 +311,60 @@ def delete_item(iid):
     if error: return err(error)
     return ok(message="تم حذف الصنف")
 
+@api.route("/items/import", methods=["POST"])
+@jwt_required()
+@require_role("admin","manager")
+def import_items():
+    f = request.files.get("file")
+    if not f: return err("الملف مطلوب")
+    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
+    imported = 0; errors = []
+    rows = []
+    if ext == "csv":
+        content = f.read().decode("utf-8-sig").splitlines()
+        reader = csv.DictReader(content)
+        for row in reader: rows.append(row)
+    elif ext in ("xlsx","xls"):
+        import openpyxl
+        wb = openpyxl.load_workbook(f)
+        ws = wb.active
+        header = [c.value for c in next(ws.iter_rows(min_row=1,max_row=1))]
+        for r in ws.iter_rows(min_row=2, values_only=True):
+            rows.append(dict(zip(header, r)))
+    else:
+        return err("الرجاء رفع ملف CSV أو Excel")
+    uid = int(get_jwt_identity())
+    for i, row in enumerate(rows, 2):
+        try:
+            name = str(row.get("name","") or row.get("اسم الصنف","") or "").strip()
+            code = str(row.get("code","") or row.get("الكود","") or "").strip()
+            if not name or not code:
+                errors.append(f"سطر {i}: الكود والاسم مطلوبان"); continue
+            if Item.query.filter_by(code=code).first():
+                errors.append(f"سطر {i}: الكود '{code}' موجود مسبقاً"); continue
+            cat_name = str(row.get("category","") or row.get("الفئة","") or "").strip()
+            cat = None
+            if cat_name:
+                cat = Category.query.filter_by(name=cat_name).first()
+                if not cat:
+                    cat = Category(name=cat_name); db.session.add(cat); db.session.flush()
+            item = Item(
+                code=code, name=name,
+                barcode=str(row.get("barcode","") or row.get("الباركود","") or "") or None,
+                category_id=cat.id if cat else None,
+                unit=str(row.get("unit","") or row.get("الوحدة","") or "قطعة"),
+                min_quantity=float(row.get("min_quantity","") or row.get("الحد الأدنى","") or 0),
+                reorder_point=float(row.get("reorder_point","") or row.get("نقطة إعادة الطلب","") or 0),
+                unit_price=float(row.get("unit_price","") or row.get("سعر الوحدة","") or 0),
+                description=str(row.get("description","") or row.get("الوصف","") or ""),
+            )
+            db.session.add(item); imported += 1
+        except Exception as e:
+            errors.append(f"سطر {i}: {str(e)}")
+    db.session.commit()
+    AuditService.log("import","item",0,f"استيراد {imported} صنفاً عبر Excel/CSV")
+    return ok({"imported": imported, "errors": errors[:50]}, f"تم استيراد {imported} صنفاً")
+
 @api.route("/items/<int:iid>/barcode", methods=["GET"])
 @jwt_required()
 def item_barcode_img(iid):
@@ -379,6 +460,33 @@ def bulk_barcode_labels():
                      download_name=f"bulk_barcodes_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                      as_attachment=True)
 
+@api.route("/items/<int:iid>/image", methods=["POST"])
+@jwt_required()
+def upload_item_image(iid):
+    item = Item.query.get_or_404(iid)
+    f = request.files.get("file")
+    if not f: return err("الملف مطلوب")
+    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
+    if ext not in {"jpg","jpeg","png","gif","webp"}:
+        return err("نوع الملف غير مسموح: JPG, PNG, GIF, WEBP فقط")
+    f.seek(0, os.SEEK_END); fsize = f.tell(); f.seek(0)
+    if fsize > 5 * 1024 * 1024: return err("حجم الملف يتجاوز 5 ميجابايت")
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = f"item_img_{iid}_{ts}.{ext}"
+    folder = os.path.join(current_app.root_path, "..", "uploads", "images")
+    os.makedirs(folder, exist_ok=True)
+    f.save(os.path.join(folder, safe_name))
+    item.image_url = f"/uploads/images/{safe_name}"
+    db.session.commit()
+    AuditService.log("upload","item_image",iid,f"رفع صورة للصنف {item.name}")
+    return ok({"image_url": item.image_url})
+
+@api.route("/uploads/images/<path:filename>", methods=["GET"])
+@jwt_required()
+def serve_item_image(filename):
+    folder = os.path.join(current_app.root_path, "..", "uploads", "images")
+    return send_from_directory(folder, filename)
+
 # ══════════════════════════════════════════════════════════════
 #  STOCK MOVEMENTS
 # ══════════════════════════════════════════════════════════════
@@ -400,6 +508,64 @@ def get_movements():
     )
     return ok({"movements":[m.to_dict() for m in result["items"]],
                "total":result["total"],"page":result["page"],"pages":result["pages"]})
+
+@api.route("/movements/<int:mid>/invoice", methods=["GET"])
+@jwt_required()
+def movement_invoice(mid):
+    mov = StockMovement.query.get_or_404(mid)
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    except ImportError:
+        return err("reportlab غير مثبت")
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    ts = ParagraphStyle("T", parent=styles["Title"], fontSize=16, alignment=TA_CENTER)
+    elems = []
+    company = "شركة النبلاء للمقاولات العامة والإنشاءات"
+    elems.append(Paragraph(f"<b>{company}</b>", ts))
+    elems.append(Paragraph(f"نظام إدارة المخازن — فاتورة صرف", styles["Normal"]))
+    elems.append(Spacer(1, 0.5*cm))
+    item_name = mov.item.name if mov.item else "—"
+    wh_name = mov.warehouse.name if mov.warehouse else "—"
+    uname = mov.user.name if mov.user else "—"
+    info = [
+        ["رقم الفاتورة:", f"INV-{mov.id:05d}"],
+        ["التاريخ:", mov.created_at.strftime("%d/%m/%Y %H:%M") if mov.created_at else "—"],
+        ["الصنف:", item_name],
+        ["الكمية:", str(mov.quantity)],
+        ["سعر الوحدة:", f"{mov.unit_price:,.2f} ر.س" if mov.unit_price else "—"],
+        ["الإجمالي:", f"{mov.quantity * (mov.unit_price or 0):,.2f} ر.س"],
+        ["المخزن:", wh_name],
+        ["المرجع:", mov.ref_number or "—"],
+        ["المنفذ:", uname],
+        ["المشروع:", mov.project or "—"],
+        ["المهندس:", mov.engineer_name or "—"],
+    ]
+    t = Table(info, colWidths=[4*cm, 10*cm])
+    t.setStyle(TableStyle([
+        ("FONTSIZE", (0,0), (-1,-1), 10),
+        ("ALIGN", (0,0), (0,-1), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#BDC3C7")),
+        ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#1B4F72")),
+        ("TEXTCOLOR", (0,0), (0,-1), colors.white),
+    ]))
+    elems.append(t)
+    if mov.notes:
+        elems.append(Spacer(1, 0.3*cm))
+        elems.append(Paragraph(f"<b>ملاحظات:</b> {mov.notes}", styles["Normal"]))
+    doc.build(elems); buf.seek(0)
+    return send_file(buf, mimetype="application/pdf",
+                     download_name=f"invoice_{mov.id:05d}.pdf", as_attachment=True)
 
 @api.route("/movements", methods=["POST"])
 @jwt_required()
@@ -429,6 +595,14 @@ def create_movement():
     if errs: return err("بيانات ناقصة", errors=errs)
     mov, error = MovementService.create(data, uid)
     if error: return err(error)
+    # low-stock email alert
+    if data.get("type") in ("out","damage","transfer"):
+        item = Item.query.get(data["item_id"])
+        if item and item.get_total_stock() <= item.min_quantity:
+            send_notif_email(f"⚠️ تنبيه نفاد: {item.name}",
+                f"نفاذ مخزون الصنف: {item.name} ({item.code})\n"
+                f"المتبقي: {item.get_total_stock()} {item.unit}\n"
+                f"الحد الأدنى: {item.min_quantity} {item.unit}")
     return created(mov.to_dict())
 
 # ══════════════════════════════════════════════════════════════
@@ -449,15 +623,63 @@ def create_transfer():
     if errs: return err("بيانات ناقصة", errors=errs)
     tr, error = TransferService.create(data, uid)
     if error: return err(error)
+    item = Item.query.get(data["item_id"])
+    to_wh = Warehouse.query.get(data["to_warehouse_id"])
+    send_notif_email(f"🔄 تحويل جديد: {tr.ref_number}",
+        f"تم إنشاء تحويل جديد:\nالصنف: {item.name if item else '—'}\n"
+        f"الكمية: {data['quantity']}\nإلى: {to_wh.name if to_wh else '—'}\n"
+        f"السبب: {data.get('reason','')}\nالطالب: {_uname(uid)}")
     return created(tr.to_dict())
+
+def _process_chain_approval(entity, uid, resource_type):
+    """Process multi-level approval. Returns (success, message, status)"""
+    if not entity.approval_chain_id:
+        return True, "", ""
+    chain = ApprovalChain.query.get(entity.approval_chain_id)
+    if not chain or not chain.is_active:
+        return True, "", ""
+    steps = sorted(chain.steps, key=lambda s: s.step_order)
+    if not steps:
+        return True, "", ""
+    step_idx = entity.current_step or 0
+    if step_idx >= len(steps):
+        return True, "", ""
+    step = steps[step_idx]
+    user = User.query.get(uid)
+    if user.role != step.role:
+        return False, f"يجب أن يكون المعتمد بدور {step.role}", ""
+    al = ApprovalLog(resource_type=resource_type, resource_id=entity.id,
+                     approver_id=uid, status="approved", level=step_idx+1)
+    db.session.add(al)
+    if step.approval_type == "all" and step.role:
+        approved = ApprovalLog.query.filter_by(
+            resource_type=resource_type, resource_id=entity.id,
+            level=step_idx+1, status="approved").count()
+        total = User.query.filter_by(role=step.role).count()
+        if approved < total:
+            db.session.commit()
+            return True, f"تمت الموافقة ({approved}/{total})", "step_same"
+    entity.current_step = step_idx + 1
+    if entity.current_step >= len(steps):
+        return True, "", "final"
+    db.session.commit()
+    return True, f"تمت الموافقة على الخطوة {step_idx+1} من {len(steps)}", "step"
 
 @api.route("/transfers/<int:tid>/approve", methods=["POST"])
 @require_role("admin","manager")
 def approve_transfer(tid):
     uid = int(get_jwt_identity())
-    tr, error = TransferService.approve(tid, uid)
+    tr = Transfer.query.get_or_404(tid)
+    if tr.status != "pending":
+        return err("تمت معالجة هذا الطلب مسبقاً")
+    is_ok, msg, final = _process_chain_approval(tr, uid, "transfer")
+    if not is_ok: return err(msg)
+    if final in ("step", "step_same"):
+        db.session.commit()
+        return ok(tr.to_dict(), msg)
+    result, error = TransferService.approve(tid, uid)
     if error: return err(error)
-    return ok(tr.to_dict(), "تم اعتماد وتنفيذ التحويل")
+    return ok(result.to_dict(), "تم اعتماد وتنفيذ التحويل")
 
 @api.route("/transfers/<int:tid>/reject", methods=["POST"])
 @require_role("admin","manager")
@@ -526,6 +748,40 @@ def complete_count(cid):
     result, error = CountService.complete(cid, uid)
     if error: return err(error)
     return ok({"differences":result["differences"]}, "تم إغلاق الجرد وتسوية الفروقات")
+
+@api.route("/schedule-counts", methods=["GET"])
+@jwt_required()
+def get_schedule_counts():
+    return ok([s.to_dict() for s in ScheduledCount.query.all()])
+
+@api.route("/schedule-counts", methods=["POST"])
+@require_role("admin","manager")
+def create_schedule_count():
+    data = request.get_json() or {}
+    sc = ScheduledCount(warehouse_id=data.get("warehouse_id"),
+        frequency=data.get("frequency","monthly"),
+        day_of_month=data.get("day_of_month",1),
+        day_of_week=data.get("day_of_week",0))
+    db.session.add(sc); db.session.commit()
+    AuditService.log("create","schedule_count",sc.id,"جدولة جرد دوري")
+    return created(sc.to_dict())
+
+@api.route("/schedule-counts/<int:sid>", methods=["PUT"])
+@require_role("admin","manager")
+def update_schedule_count(sid):
+    sc = ScheduledCount.query.get_or_404(sid)
+    data = request.get_json() or {}
+    for f in ["warehouse_id","frequency","day_of_month","day_of_week","is_active"]:
+        if f in data: setattr(sc, f, data[f])
+    db.session.commit()
+    return ok(sc.to_dict())
+
+@api.route("/schedule-counts/<int:sid>", methods=["DELETE"])
+@require_role("admin")
+def delete_schedule_count(sid):
+    sc = ScheduledCount.query.get_or_404(sid)
+    db.session.delete(sc); db.session.commit()
+    return ok(message="تم حذف الجدولة")
 
 # ══════════════════════════════════════════════════════════════
 #  SUPPLIERS
@@ -598,8 +854,6 @@ def update_project(pid):
         if f in data: setattr(p, f, data[f])
     for f in ("budget","actual_cost","completion_pct"):
         if f in data: setattr(p, f, float(data[f]))
-    if "actual_cost" in data or "completion_pct" in data:
-        pass
     AuditService.log("edit","project",pid,f"تعديل مشروع: {p.name}")
     db.session.commit()
     return ok(p.to_dict())
@@ -922,6 +1176,193 @@ def stock_valuation():
             grand_qty += v["total_qty"]; grand_val += v["total_value"]
     return ok({"layers": results, "total_items": len(results), "grand_total_qty": grand_qty, "grand_total_value": round(grand_val, 2)})
 
+@api.route("/reports/aging", methods=["GET"])
+@jwt_required()
+def inventory_aging():
+    items = Item.query.filter_by(is_active=True).all()
+    now = datetime.datetime.utcnow()
+    data = []
+    for it in items:
+        # age from FIFO layers
+        layers = InventoryLayer.query.filter(InventoryLayer.item_id == it.id, InventoryLayer.quantity > 0).order_by(InventoryLayer.created_at).all()
+        oldest = None; total_qty = 0; total_val = 0
+        buckets = {"0-30":0, "31-60":0, "61-90":0, "91-180":0, "181-365":0, "365+":0}
+        qty_buckets = {"0-30":0, "31-60":0, "61-90":0, "91-180":0, "181-365":0, "365+":0}
+        for ly in layers:
+            days = (now - ly.created_at).days
+            q = ly.quantity
+            total_qty += q; total_val += q * ly.unit_price
+            if oldest is None or ly.created_at < oldest: oldest = ly.created_at
+            if days <= 30: b = "0-30"
+            elif days <= 60: b = "31-60"
+            elif days <= 90: b = "61-90"
+            elif days <= 180: b = "91-180"
+            elif days <= 365: b = "181-365"
+            else: b = "365+"
+            buckets[b] = round(buckets[b] + q * ly.unit_price, 2)
+            qty_buckets[b] += q
+        if total_qty > 0:
+            data.append({
+                "item_id": it.id, "item_name": it.name, "item_code": it.code,
+                "unit": it.unit, "total_qty": total_qty, "total_value": round(total_val, 2),
+                "oldest_days": (now - oldest).days if oldest else 0,
+                "buckets": buckets, "qty_buckets": qty_buckets,
+            })
+    data.sort(key=lambda x: x["oldest_days"], reverse=True)
+    return ok({"items": data, "total_items": len(data)})
+
+@api.route("/stock/cleanup-layers", methods=["POST"])
+@jwt_required()
+@require_role("admin","manager")
+def cleanup_layers():
+    deleted = InventoryLayer.query.filter(InventoryLayer.quantity == 0).delete()
+    db.session.commit()
+    AuditService.log("cleanup","inventory_layer",0,f"حذف {deleted} FIFO layer(s) صفر الكمية")
+    return ok({"deleted": deleted}, f"تم حذف {deleted} طبقة")
+
+# ══════════════════════════════════════════════════════════════
+#  LOTS
+# ══════════════════════════════════════════════════════════════
+@api.route("/lots", methods=["GET"])
+@jwt_required()
+def get_lots():
+    item_id = request.args.get("item_id", type=int)
+    status  = request.args.get("status")
+    q = Lot.query
+    if item_id: q = q.filter_by(item_id=item_id)
+    if status:  q = q.filter_by(status=status)
+    return ok([l.to_dict() for l in q.order_by(Lot.created_at.desc()).all()])
+
+@api.route("/lots", methods=["POST"])
+@jwt_required()
+@require_role("admin","manager")
+def create_lot():
+    data = request.get_json() or {}
+    item_id = data.get("item_id")
+    lot_num = data.get("lot_number","").strip()
+    if not item_id or not lot_num: return err("الصنف ورقم الدفعة مطلوبان")
+    existing = Lot.query.filter_by(item_id=item_id, lot_number=lot_num).first()
+    if existing: return err("رقم الدفعة موجود مسبقاً لهذا الصنف")
+    lot = Lot(item_id=item_id, lot_number=lot_num,
+              expiry_date=datetime.datetime.strptime(data["expiry_date"],"%Y-%m-%d") if data.get("expiry_date") else None)
+    db.session.add(lot); db.session.commit()
+    AuditService.log("create","lot",lot.id,f"إضافة دفعة {lot_num}")
+    return created(lot.to_dict())
+
+@api.route("/lots/<int:lid>", methods=["PUT"])
+@jwt_required()
+@require_role("admin","manager")
+def update_lot(lid):
+    lot = Lot.query.get_or_404(lid)
+    data = request.get_json() or {}
+    for f in ["lot_number","status"]:
+        if f in data: setattr(lot, f, data[f])
+    if "expiry_date" in data:
+        lot.expiry_date = datetime.datetime.strptime(data["expiry_date"],"%Y-%m-%d") if data["expiry_date"] else None
+    db.session.commit()
+    return ok(lot.to_dict())
+
+# ══════════════════════════════════════════════════════════════
+#  UNIT CONVERSIONS
+# ══════════════════════════════════════════════════════════════
+@api.route("/units", methods=["GET"])
+@jwt_required()
+def get_units():
+    return ok([u.to_dict() for u in UnitConversion.query.all()])
+
+@api.route("/units/convert", methods=["GET"])
+@jwt_required()
+def convert_unit():
+    from_unit = request.args.get("from","")
+    to_unit   = request.args.get("to","")
+    qty       = request.args.get("qty", 1, type=float)
+    if from_unit == to_unit:
+        return ok({"from":from_unit,"to":to_unit,"qty":qty,"result":qty,"factor":1})
+    conv = UnitConversion.query.filter_by(from_unit=from_unit, to_unit=to_unit).first()
+    if not conv:
+        # try reverse
+        rev = UnitConversion.query.filter_by(from_unit=to_unit, to_unit=from_unit).first()
+        if rev:
+            return ok({"from":from_unit,"to":to_unit,"qty":qty,"result":round(qty / rev.factor, 4),"factor":round(1/rev.factor, 4)})
+        return err("لا يوجد تحويل بين هاتين الوحدتين")
+    return ok({"from":from_unit,"to":to_unit,"qty":qty,"result":round(qty * conv.factor, 4),"factor":conv.factor})
+
+@api.route("/units", methods=["POST"])
+@jwt_required()
+@require_role("admin")
+def create_unit():
+    data = request.get_json() or {}
+    if not data.get("from_unit") or not data.get("to_unit") or not data.get("factor"):
+        return err("جميع الحقول مطلوبة")
+    existing = UnitConversion.query.filter_by(from_unit=data["from_unit"], to_unit=data["to_unit"]).first()
+    if existing: return err("التحويل موجود مسبقاً")
+    uc = UnitConversion(from_unit=data["from_unit"], to_unit=data["to_unit"], factor=data["factor"])
+    db.session.add(uc); db.session.commit()
+    return created(uc.to_dict())
+
+@api.route("/units/<int:uid>", methods=["DELETE"])
+@jwt_required()
+@require_role("admin")
+def delete_unit(uid):
+    uc = UnitConversion.query.get_or_404(uid)
+    db.session.delete(uc); db.session.commit()
+    return ok(message="تم حذف التحويل")
+
+# ══════════════════════════════════════════════════════════════
+#  APPROVAL CHAINS
+# ══════════════════════════════════════════════════════════════
+@api.route("/approval/chains", methods=["GET"])
+@jwt_required()
+def get_approval_chains():
+    target_type = request.args.get("target_type")
+    q = ApprovalChain.query
+    if target_type: q = q.filter_by(target_type=target_type)
+    return ok([c.to_dict() for c in q.order_by(ApprovalChain.created_at.desc()).all()])
+
+@api.route("/approval/chains", methods=["POST"])
+@jwt_required()
+@require_role("admin")
+def create_approval_chain():
+    data = request.get_json() or {}
+    if not data.get("name") or not data.get("target_type"):
+        return err("الاسم ونوع الهدف مطلوبان")
+    chain = ApprovalChain(name=data["name"], target_type=data["target_type"])
+    db.session.add(chain); db.session.flush()
+    for i, s in enumerate(data.get("steps", [])):
+        step = ApprovalStep(chain_id=chain.id, step_order=i+1,
+            role=s.get("role","manager"), user_id=s.get("user_id"),
+            approval_type=s.get("approval_type","any"))
+        db.session.add(step)
+    db.session.commit()
+    AuditService.log("create","approval_chain",chain.id,f"إنشاء سلسلة اعتماد: {chain.name}")
+    return created(chain.to_dict())
+
+@api.route("/approval/chains/<int:cid>", methods=["PUT"])
+@jwt_required()
+@require_role("admin")
+def update_approval_chain(cid):
+    chain = ApprovalChain.query.get_or_404(cid)
+    data = request.get_json() or {}
+    for f in ["name","target_type","is_active"]:
+        if f in data: setattr(chain, f, data[f])
+    if "steps" in data:
+        ApprovalStep.query.filter_by(chain_id=cid).delete()
+        for i, s in enumerate(data["steps"]):
+            step = ApprovalStep(chain_id=cid, step_order=i+1,
+                role=s.get("role","manager"), user_id=s.get("user_id"),
+                approval_type=s.get("approval_type","any"))
+            db.session.add(step)
+    db.session.commit()
+    return ok(chain.to_dict())
+
+@api.route("/approval/chains/<int:cid>", methods=["DELETE"])
+@jwt_required()
+@require_role("admin")
+def delete_approval_chain(cid):
+    chain = ApprovalChain.query.get_or_404(cid)
+    db.session.delete(chain); db.session.commit()
+    return ok(message="تم حذف سلسلة الاعتماد")
+
 @api.route("/reports/consumption", methods=["GET"])
 @jwt_required()
 def consumption_report():
@@ -988,6 +1429,40 @@ def supplier_performance():
     for d in data:
         d["evaluations"] = eval_map.get(d["supplier_id"], {})
     return ok(data)
+
+@api.route("/reports/abc", methods=["GET"])
+@jwt_required()
+def abc_analysis():
+    items = Item.query.filter_by(is_active=True).all()
+    values = []
+    for it in items:
+        total_stock = it.get_total_stock()
+        total_value = total_stock * it.unit_price
+        values.append({"item_id":it.id,"item_name":it.name,"item_code":it.code,
+                       "category":it.category.name if it.category else "",
+                       "unit":it.unit,"total_stock":total_stock,
+                       "unit_price":float(it.unit_price),
+                       "total_value":round(total_value,2)})
+    values.sort(key=lambda x: x["total_value"], reverse=True)
+    grand_total = sum(v["total_value"] for v in values) or 1
+    cumulative = 0
+    for v in values:
+        cumulative += v["total_value"]
+        v["pct"] = round(v["total_value"] / grand_total * 100, 2)
+        v["cumulative_pct"] = round(cumulative / grand_total * 100, 2)
+        v["class"] = "A" if v["cumulative_pct"] <= 80 else "B" if v["cumulative_pct"] <= 95 else "C"
+    a = [v for v in values if v["class"]=="A"]
+    b = [v for v in values if v["class"]=="B"]
+    c = [v for v in values if v["class"]=="C"]
+    return ok({
+        "items": values,
+        "summary": {
+            "grand_total": round(grand_total, 2),
+            "A": {"count":len(a),"value":round(sum(v["total_value"] for v in a),2)},
+            "B": {"count":len(b),"value":round(sum(v["total_value"] for v in b),2)},
+            "C": {"count":len(c),"value":round(sum(v["total_value"] for v in c),2)},
+        }
+    })
 
 # ══════════════════════════════════════════════════════════════
 #  FILE ATTACHMENTS — PROCUREMENT
@@ -1373,6 +1848,26 @@ def export_csv():
                             f"{l['resource']}#{l['resource_id']}" if l['resource_id'] else l['resource'],
                             l["description"] or "",l["ip_address"] or "",
                             l["old_data"] or "",l["new_data"] or ""])
+    elif rtype == "abc":
+        writer.writerow(["كود الصنف","الصنف","الفئة","الوحدة","إجمالي الكمية","سعر الوحدة","القيمة","%","تراكمي %","التصنيف"])
+        with app.test_request_context():
+            resp = abc_analysis()
+            result = resp.get_json()["data"]
+        for i in result.get("items", []):
+            writer.writerow([i["item_code"], i["item_name"], i["category"], i["unit"],
+                           i["total_stock"], i["unit_price"], i["total_value"],
+                           f"{i['pct']}%", f"{i['cumulative_pct']}%", i["class"]])
+    elif rtype == "aging":
+        writer.writerow(["كود الصنف","الصنف","الوحدة","الكمية","القيمة","أقدم يوم","0-30","31-60","61-90","91-180","181-365","365+"])
+        with app.test_request_context():
+            resp = inventory_aging()
+            result = resp.get_json()["data"]
+        for i in result.get("items", []):
+            b = i.get("qty_buckets",{})
+            writer.writerow([i["item_code"], i["item_name"], i["unit"],
+                           i["total_qty"], i["total_value"], i["oldest_days"],
+                           b.get("0-30",0), b.get("31-60",0), b.get("61-90",0),
+                           b.get("91-180",0), b.get("181-365",0), b.get("365+",0)])
     else:
         return err("نوع تقرير غير معروف")
 
@@ -1711,6 +2206,57 @@ def export_pdf():
         elements.append(make_table(data, headers, col_w))
         elements.append(Spacer(1,0.3*cm))
         elements.append(Paragraph(f"Total Logs: {len(data)}", f_style))
+
+    elif rtype == "abc":
+        headers = ["Code","Item","Category","Unit","Stock","Unit Price","Value","%","Cum %","Class"]
+        data = []
+        with app.test_request_context():
+            resp = abc_analysis()
+            result = resp.get_json()["data"]
+        for i in result.get("items", []):
+            data.append([
+                i["item_code"], i["item_name"][:20], i["category"][:12], i["unit"],
+                str(int(i["total_stock"])), f"{i['unit_price']:,.2f}",
+                f"{i['total_value']:,.2f}", f"{i['pct']}%",
+                f"{i['cumulative_pct']}%", i["class"],
+            ])
+        col_w = [2*cm, 4*cm, 2.5*cm, 1.5*cm, 1.5*cm, 2.5*cm, 3*cm, 1.5*cm, 1.5*cm, 1.5*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"ABC Inventory Analysis — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
+        s = result.get("summary", {})
+        elements.append(Spacer(1,0.3*cm))
+        elements.append(Paragraph(
+            f"A: {s.get('A',{}).get('count',0)} items ({s.get('A',{}).get('value',0):,.0f} SAR) | "
+            f"B: {s.get('B',{}).get('count',0)} items ({s.get('B',{}).get('value',0):,.0f} SAR) | "
+            f"C: {s.get('C',{}).get('count',0)} items ({s.get('C',{}).get('value',0):,.0f} SAR) | "
+            f"Total: {s.get('grand_total',0):,.0f} SAR", f_style))
+
+    elif rtype == "aging":
+        headers = ["Code","Item","Unit","Qty","Value","Oldest Day","0-30","31-60","61-90","91-180","181-365","365+"]
+        data = []
+        with app.test_request_context():
+            resp = inventory_aging()
+            result = resp.get_json()["data"]
+        for i in result.get("items", []):
+            b = i.get("qty_buckets",{})
+            data.append([
+                i["item_code"], i["item_name"][:20], i["unit"],
+                str(int(i["total_qty"])), f"{i['total_value']:,.2f}", f"{i['oldest_days']}d",
+                str(int(b.get("0-30",0))), str(int(b.get("31-60",0))),
+                str(int(b.get("61-90",0))), str(int(b.get("91-180",0))),
+                str(int(b.get("181-365",0))), str(int(b.get("365+",0))),
+            ])
+        col_w = [2*cm, 3.5*cm, 1.5*cm, 1.5*cm, 2.5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm]
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                                rightMargin=1.5*cm, leftMargin=1.5*cm,
+                                topMargin=2*cm, bottomMargin=1.5*cm)
+        elements.append(Paragraph(f"Inventory Aging Report — {now_str}", t_style))
+        elements.append(Spacer(1, 0.3*cm))
+        elements.append(make_table(data, headers, col_w))
 
     else:
         return err("نوع تقرير غير معروف")
@@ -2335,12 +2881,36 @@ def update_po(pid):
 def approve_po(pid):
     po = PurchaseOrder.query.get_or_404(pid)
     if po.status != "draft": return err("يمكن اعتماد المسودات فقط")
+    is_ok, msg, final = _process_chain_approval(po, int(get_jwt_identity()), "po")
+    if not is_ok: return err(msg)
+    if final in ("step", "step_same"):
+        db.session.commit()
+        return ok(po.to_dict(), msg)
+    if final == "final":
+        po.status = "approved"
+        AuditService.log("approve","purchase_order",pid,f"اعتماد أمر شراء: {po.ref_number}")
+        db.session.commit()
+        return ok(po.to_dict())
     po.status = "approved"
     level = (request.get_json() or {}).get("level", 1)
     Appr = ApprovalLog(resource_type="po", resource_id=po.id,
-           reviewer_id=g.current_user.id, decision="approved", level=level)
+           approver_id=g.current_user.id, status="approved", level=level)
     db.session.add(Appr)
     AuditService.log("approve","purchase_order",pid,f"اعتماد أمر شراء: {po.ref_number}")
+    db.session.commit()
+    return ok(po.to_dict())
+
+@api.route("/procurement/po/<int:pid>/reject", methods=["POST"])
+@require_role("admin","manager")
+def reject_po(pid):
+    po = PurchaseOrder.query.get_or_404(pid)
+    if po.status != "draft": return err("يمكن رفض المسودات فقط")
+    po.status = "cancelled"
+    data = request.get_json() or {}
+    Appr = ApprovalLog(resource_type="po", resource_id=po.id,
+           approver_id=g.current_user.id, status="rejected", notes=data.get("notes",""))
+    db.session.add(Appr)
+    AuditService.log("reject","purchase_order",pid,f"رفض أمر شراء: {po.ref_number}")
     db.session.commit()
     return ok(po.to_dict())
 
@@ -2403,22 +2973,18 @@ def create_grn():
         unit_price = float(it.get("unit_price",0))
         total = round(accepted * unit_price, 2)
         total_value += total
-        gi = GRNItem(grn_id=grn.id, po_item_id=it.get("po_item_id"),
-            item_id=it.get("item_id"), item_name=it.get("item_name",""), ordered_qty=ordered,
-            received_qty=float(it.get("received_qty",ordered)),
-            damaged_qty=damaged, rejected_qty=rejected,
-            accepted_qty=accepted, unit_price=unit_price, total=total)
-        db.session.add(gi)
-        # resolve item_id if not provided
         item_id = it.get("item_id")
         if not item_id and it.get("item_name"):
             item = Item.query.filter_by(name=it["item_name"]).first()
             if item: item_id = item.id
-        # persist item_id to GRNItem
-        if item_id: gi.item_id = item_id
+        gi = GRNItem(grn_id=grn.id, po_item_id=it.get("po_item_id"),
+            item_id=item_id, item_name=it.get("item_name",""), ordered_qty=ordered,
+            received_qty=float(it.get("received_qty",ordered)),
+            damaged_qty=damaged, rejected_qty=rejected,
+            accepted_qty=accepted, unit_price=unit_price, total=total)
+        db.session.add(gi)
         # create StockMovement record for audit trail
         if accepted > 0 and grn.warehouse_id and item_id:
-            from app.services import MovementService
             try:
                 MovementService.create({"item_id":item_id,"warehouse_id":grn.warehouse_id,
                     "quantity":accepted,"type":"in","reference":ref,"unit_price":unit_price,
@@ -2447,6 +3013,10 @@ def create_grn():
             elif any_received: po.status = "partial"
     AuditService.log("create","goods_receipt",grn.id,f"إنشاء إذن استلام: {ref}")
     db.session.commit()
+    sup = Supplier.query.get(data.get("supplier_id"))
+    send_notif_email(f"📥 إذن استلام جديد: {ref}",
+        f"تم إستلام بضاعة:\nالمرجع: {ref}\nالمورد: {sup.name if sup else '—'}\n"
+        f"إجمالي القيمة: {total_value:,.2f} ر.س\nالمستلم: {_uname(g.current_user.id)}")
     return created(grn.to_dict())
 
 @api.route("/procurement/grn/<int:gid>", methods=["GET"])

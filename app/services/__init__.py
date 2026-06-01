@@ -1,10 +1,10 @@
 """
-طبقة الخدمات — Business Logic Services
-كل المنطق التجاري معزول هنا بعيداً عن الـ routes
+ط·ط¨ظ‚ط© ط§ظ„ط®ط¯ظ…ط§طھ â€” Business Logic Services
+ظƒظ„ ط§ظ„ظ…ظ†ط·ظ‚ ط§ظ„طھط¬ط§ط±ظٹ ظ…ط¹ط²ظˆظ„ ظ‡ظ†ط§ ط¨ط¹ظٹط¯ط§ظ‹ ط¹ظ† ط§ظ„ظ€ routes
 """
 import datetime, json, calendar
 from sqlalchemy import func
-from flask import request
+from flask import request, current_app
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from app.models import (db, User, Warehouse, Category, Supplier, Item,
                          Stock, StockMovement, Transfer, InventoryCount,
@@ -14,12 +14,13 @@ from app.models import (db, User, Warehouse, Category, Supplier, Item,
                          PurchaseOrder, POItem,
                          GoodsReceipt, GRNItem,
                          PurchaseReturn, PReturnItem,
-                         SupplierEvaluation, SupplierProfile, InventoryLayer)
+                         SupplierEvaluation, SupplierProfile, InventoryLayer,
+                         ApprovalChain)
 from app.utils import gen_ref, paginate, parse_date
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  AUDIT SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class AuditService:
     @staticmethod
     def log(action, resource=None, resource_id=None, desc="", old=None, new=None):
@@ -65,9 +66,9 @@ class AuditService:
         return paginate(q, page, per_page)
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  NOTIFICATION SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class NotificationService:
     @staticmethod
     def push(type_, title, message, ref_type=None, ref_id=None, roles=("admin","manager")):
@@ -104,16 +105,16 @@ class NotificationService:
             if not exists:
                 NotificationService.push(
                     "low_stock",
-                    f"⚠️ مخزون منخفض: {item.name}",
-                    f"الرصيد الإجمالي {total} {item.unit} — الحد الأدنى {item.min_quantity}",
+                    f"âڑ ï¸ڈ ظ…ط®ط²ظˆظ† ظ…ظ†ط®ظپط¶: {item.name}",
+                    f"ط§ظ„ط±طµظٹط¯ ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ {total} {item.unit} â€” ط§ظ„ط­ط¯ ط§ظ„ط£ط¯ظ†ظ‰ {item.min_quantity}",
                     ref_type="item", ref_id=item_id,
                 )
                 db.session.commit()
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  AUTH SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class AuthService:
     @staticmethod
     def login(username, password):
@@ -121,13 +122,13 @@ class AuthService:
             (User.username == username) | (User.email == username)
         ).first()
         if not user or not user.check_password(password):
-            AuditService.log("login_failed", "auth", desc=f"فشل دخول: {username}")
+            AuditService.log("login_failed", "auth", desc=f"ظپط´ظ„ ط¯ط®ظˆظ„: {username}")
             db.session.commit()
-            return None, "بيانات تسجيل الدخول غير صحيحة"
+            return None, "ط¨ظٹط§ظ†ط§طھ طھط³ط¬ظٹظ„ ط§ظ„ط¯ط®ظˆظ„ ط؛ظٹط± طµط­ظٹط­ط©"
         if not user.is_active:
-            return None, "الحساب موقوف — تواصل مع المسؤول"
+            return None, "ط§ظ„ط­ط³ط§ط¨ ظ…ظˆظ‚ظˆظپ â€” طھظˆط§طµظ„ ظ…ط¹ ط§ظ„ظ…ط³ط¤ظˆظ„"
         user.last_login = datetime.datetime.utcnow()
-        AuditService.log("login", "auth", user.id, f"دخول: {user.name}")
+        AuditService.log("login", "auth", user.id, f"ط¯ط®ظˆظ„: {user.name}")
         db.session.commit()
         return user, None
 
@@ -135,20 +136,20 @@ class AuthService:
     def change_password(user_id, old_pw, new_pw):
         user = User.query.get(user_id)
         if not user:
-            return False, "المستخدم غير موجود"
+            return False, "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         if not user.check_password(old_pw):
-            return False, "كلمة المرور الحالية غير صحيحة"
+            return False, "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ط§ظ„ط­ط§ظ„ظٹط© ط؛ظٹط± طµط­ظٹط­ط©"
         if len(new_pw) < 6:
-            return False, "كلمة المرور يجب أن تكون 6 أحرف على الأقل"
+            return False, "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ظٹط¬ط¨ ط£ظ† طھظƒظˆظ† 6 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„"
         user.set_password(new_pw)
-        AuditService.log("update", "user", user_id, "تغيير كلمة المرور")
+        AuditService.log("update", "user", user_id, "طھط؛ظٹظٹط± ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط±")
         db.session.commit()
         return True, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  DASHBOARD SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class DashboardService:
     @staticmethod
     def get_data(user_id):
@@ -187,7 +188,7 @@ class DashboardService:
 
         # 7-day chart
         chart = []
-        day_names = ["الإثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"]
+        day_names = ["ط§ظ„ط¥ط«ظ†ظٹظ†","ط§ظ„ط«ظ„ط§ط«ط§ط،","ط§ظ„ط£ط±ط¨ط¹ط§ط،","ط§ظ„ط®ظ…ظٹط³","ط§ظ„ط¬ظ…ط¹ط©","ط§ظ„ط³ط¨طھ","ط§ظ„ط£ط­ط¯"]
         for i in range(6, -1, -1):
             d  = (datetime.datetime.utcnow() - datetime.timedelta(days=i)).date()
             dm = StockMovement.query.filter(func.date(StockMovement.created_at)==d).all()
@@ -210,6 +211,14 @@ class DashboardService:
         month_po_value = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
             PurchaseOrder.created_at >= month_start).scalar() or 0
 
+        # Turnover rate: total out value (30d) / avg inventory value
+        thirty_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        out_val_30d = db.session.query(func.sum(StockMovement.quantity * StockMovement.unit_price)).filter(
+            StockMovement.type.in_(["out","damage"]),
+            StockMovement.created_at >= thirty_ago).scalar() or 0
+        turnover_rate = round(float(out_val_30d) / total_value, 2) if total_value > 0 else 0
+        avg_storage_days = 30 / turnover_rate if turnover_rate > 0 else 0
+
         # Top items by stock value
         top_items = []
         for it in sorted(items, key=lambda x: x.get_total_stock() * x.unit_price, reverse=True)[:10]:
@@ -231,7 +240,7 @@ class DashboardService:
 
         # Monthly procurement chart (last 6 months)
         po_chart = []
-        month_names = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+        month_names = ["ظٹظ†ط§ظٹط±","ظپط¨ط±ط§ظٹط±","ظ…ط§ط±ط³","ط£ط¨ط±ظٹظ„","ظ…ط§ظٹظˆ","ظٹظˆظ†ظٹظˆ","ظٹظˆظ„ظٹظˆ","ط£ط؛ط³ط·ط³","ط³ط¨طھظ…ط¨ط±","ط£ظƒطھظˆط¨ط±","ظ†ظˆظپظ…ط¨ط±","ط¯ظٹط³ظ…ط¨ط±"]
         for i in range(5, -1, -1):
             m = (today.replace(day=1) - datetime.timedelta(days=30*i)).replace(day=1)
             _, days_in_month = calendar.monthrange(m.year, m.month)
@@ -239,6 +248,17 @@ class DashboardService:
             total = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
                 PurchaseOrder.created_at >= m, PurchaseOrder.created_at <= m_end).scalar() or 0
             po_chart.append({"month": month_names[m.month-1], "value": round(float(total), 2)})
+
+        # Consumption trend (last 6 months)
+        cons_chart = []
+        for i in range(5, -1, -1):
+            m = (today.replace(day=1) - datetime.timedelta(days=30*i)).replace(day=1)
+            _, days_in_month = calendar.monthrange(m.year, m.month)
+            m_end = m.replace(day=days_in_month)
+            total = db.session.query(func.sum(StockMovement.quantity)).filter(
+                StockMovement.type.in_(["out","transfer","damage"]),
+                StockMovement.created_at >= m, StockMovement.created_at <= m_end).scalar() or 0
+            cons_chart.append({"month": month_names[m.month-1], "value": round(float(total), 2)})
 
         return {
             "kpis": {
@@ -255,21 +275,24 @@ class DashboardService:
                 "sent_pos":          sent_pos,
                 "month_pos":         month_pos,
                 "month_po_value":    round(month_po_value, 2),
+                "turnover_rate":     turnover_rate,
+                "avg_storage_days":  round(avg_storage_days, 1),
             },
             "warehouses":           wh_stats,
             "critical_items":       critical_items,
             "recent_movements":     [m.to_dict() for m in recent],
             "chart_data":           chart,
             "po_chart":             po_chart,
+            "cons_chart":           cons_chart,
             "top_items":            top_items,
             "top_suppliers":        supplier_data,
             "unread_notifications": unread,
         }
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  ITEM SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class ItemService:
     @staticmethod
     def get_list(search="", category_id=None, status="", page=1, per_page=50):
@@ -302,16 +325,16 @@ class ItemService:
     def create(data, user_id):
         # Validate
         if Item.query.filter_by(code=data["code"]).first():
-            return None, f"الكود '{data['code']}' مستخدم مسبقاً"
+            return None, f"ط§ظ„ظƒظˆط¯ '{data['code']}' ظ…ط³طھط®ط¯ظ… ظ…ط³ط¨ظ‚ط§ظ‹"
         if data.get("barcode") and Item.query.filter_by(barcode=data["barcode"]).first():
-            return None, "الباركود مستخدم مسبقاً"
+            return None, "ط§ظ„ط¨ط§ط±ظƒظˆط¯ ظ…ط³طھط®ط¯ظ… ظ…ط³ط¨ظ‚ط§ظ‹"
 
         item = Item(
             code          = data["code"],
             barcode       = data.get("barcode"),
             name          = data["name"],
             category_id   = data.get("category_id"),
-            unit          = data.get("unit", "قطعة"),
+            unit          = data.get("unit", "ظ‚ط·ط¹ط©"),
             min_quantity  = float(data.get("min_quantity", 0)),
             reorder_point = float(data.get("reorder_point", 0)),
             unit_price    = float(data.get("unit_price", 0)),
@@ -328,10 +351,10 @@ class ItemService:
                     ref_number=gen_ref("IN"), type="in",
                     item_id=item.id, warehouse_id=wh.id,
                     quantity=qty, unit_price=item.unit_price,
-                    user_id=user_id, notes="رصيد أولي",
+                    user_id=user_id, notes="ط±طµظٹط¯ ط£ظˆظ„ظٹ",
                 ))
 
-        AuditService.log("create","item",item.id,f"إضافة صنف: {item.name}",new=data)
+        AuditService.log("create","item",item.id,f"ط¥ط¶ط§ظپط© طµظ†ظپ: {item.name}",new=data)
         db.session.commit()
         NotificationService.check_low_stock(item.id)
         return item, None
@@ -340,13 +363,13 @@ class ItemService:
     def update(item_id, data, user_id):
         item = Item.query.get(item_id)
         if not item:
-            return None, "الصنف غير موجود"
+            return None, "ط§ظ„طµظ†ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         old = item.to_dict(include_stock=False)
         for f in ["name","barcode","category_id","unit","min_quantity",
-                  "reorder_point","unit_price","description","is_active"]:
+                  "reorder_point","unit_price","description","image_url","is_active"]:
             if f in data:
                 setattr(item, f, data[f])
-        AuditService.log("update","item",item_id,f"تحديث: {item.name}",old=old,new=data)
+        AuditService.log("update","item",item_id,f"طھط­ط¯ظٹط«: {item.name}",old=old,new=data)
         db.session.commit()
         return item, None
 
@@ -354,16 +377,16 @@ class ItemService:
     def delete(item_id):
         item = Item.query.get(item_id)
         if not item:
-            return False, "الصنف غير موجود"
+            return False, "ط§ظ„طµظ†ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         item.is_active = False
-        AuditService.log("delete","item",item_id,f"حذف: {item.name}")
+        AuditService.log("delete","item",item_id,f"ط­ط°ظپ: {item.name}")
         db.session.commit()
         return True, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  MOVEMENT SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class MovementService:
     @staticmethod
     def get_list(filters, page=1, per_page=30):
@@ -385,14 +408,14 @@ class MovementService:
     def create(data, user_id):
         item  = Item.query.get(data.get("item_id"))
         if not item:
-            return None, "الصنف غير موجود"
+            return None, "ط§ظ„طµظ†ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
 
         qty    = float(data["quantity"])
         wh_id  = int(data["warehouse_id"])
         mtype  = data["type"]
 
         if qty <= 0:
-            return None, "الكمية يجب أن تكون أكبر من صفر"
+            return None, "ط§ظ„ظƒظ…ظٹط© ظٹط¬ط¨ ط£ظ† طھظƒظˆظ† ط£ظƒط¨ط± ظ…ظ† طµظپط±"
 
         # Check sufficient stock for outbound/damage
         dec = {"out","damage"}
@@ -401,8 +424,8 @@ class MovementService:
             stock   = Stock.query.filter_by(item_id=item.id, warehouse_id=wh_id).first()
             current = stock.quantity if stock else 0
             if current < qty:
-                return None, (f"الكمية المطلوبة ({qty} {item.unit}) "
-                              f"تتجاوز الرصيد المتاح ({current} {item.unit})")
+                return None, (f"ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط·ظ„ظˆط¨ط© ({qty} {item.unit}) "
+                              f"طھطھط¬ط§ظˆط² ط§ظ„ط±طµظٹط¯ ط§ظ„ظ…طھط§ط­ ({current} {item.unit})")
 
         ref_prefix = {"in":"IN","out":"OUT","return":"RET","damage":"DAM"}.get(mtype,"MOV")
         mov = StockMovement(
@@ -417,6 +440,7 @@ class MovementService:
             notes        = data.get("notes"),
             project      = data.get("project"),
             engineer_name = data.get("engineer_name"),
+            lot_number    = data.get("lot_number") or None,
         )
         db.session.add(mov)
 
@@ -446,15 +470,15 @@ class MovementService:
     def adjust(data, user_id):
         item  = Item.query.get(data.get("item_id"))
         wh_id = int(data["warehouse_id"])
-        if not item: return None, "الصنف غير موجود"
+        if not item: return None, "ط§ظ„طµظ†ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         wh = Warehouse.query.get(wh_id)
-        if not wh: return None, "المخزن غير موجود"
+        if not wh: return None, "ط§ظ„ظ…ط®ط²ظ† ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         new_qty = float(data["new_quantity"])
-        if new_qty < 0: return None, "الكمية لا يمكن أن تكون سالبة"
+        if new_qty < 0: return None, "ط§ظ„ظƒظ…ظٹط© ظ„ط§ ظٹظ…ظƒظ† ط£ظ† طھظƒظˆظ† ط³ط§ظ„ط¨ط©"
         stock = Stock.get_or_create(item.id, wh_id)
         current = stock.quantity
         diff = new_qty - current
-        if diff == 0: return None, "الكمية الجديدة تساوي الكمية الحالية — لا يوجد تغيير"
+        if diff == 0: return None, "ط§ظ„ظƒظ…ظٹط© ط§ظ„ط¬ط¯ظٹط¯ط© طھط³ط§ظˆظٹ ط§ظ„ظƒظ…ظٹط© ط§ظ„ط­ط§ظ„ظٹط© â€” ظ„ط§ ظٹظˆط¬ط¯ طھط؛ظٹظٹط±"
         mtype = "in" if diff > 0 else "out"
         mov = StockMovement(
             ref_number = gen_ref("ADJ"),
@@ -470,15 +494,15 @@ class MovementService:
         db.session.add(mov)
         stock.quantity = new_qty
         AuditService.log("create","movement",mov.id,
-                         f"تسوية: {item.name} {current} → {new_qty} {item.unit}")
+                         f"طھط³ظˆظٹط©: {item.name} {current} â†’ {new_qty} {item.unit}")
         db.session.commit()
         NotificationService.check_low_stock(item.id)
         return mov, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  TRANSFER SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class TransferService:
     @staticmethod
     def get_list(status=None):
@@ -490,11 +514,11 @@ class TransferService:
     @staticmethod
     def create(data, user_id):
         if data.get("from_warehouse_id") == data.get("to_warehouse_id"):
-            return None, "مخزن المصدر والهدف لا يمكن أن يكونا متماثلين"
+            return None, "ظ…ط®ط²ظ† ط§ظ„ظ…طµط¯ط± ظˆط§ظ„ظ‡ط¯ظپ ظ„ط§ ظٹظ…ظƒظ† ط£ظ† ظٹظƒظˆظ†ط§ ظ…طھظ…ط§ط«ظ„ظٹظ†"
 
         item = Item.query.get(data.get("item_id"))
         if not item:
-            return None, "الصنف غير موجود"
+            return None, "ط§ظ„طµظ†ظپ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
 
         qty = float(data["quantity"])
         stock = Stock.query.filter_by(
@@ -502,7 +526,7 @@ class TransferService:
         ).first()
         avail = stock.quantity if stock else 0
         if avail < qty:
-            return None, f"الرصيد غير كافٍ — المتاح: {avail} {item.unit}"
+            return None, f"ط§ظ„ط±طµظٹط¯ ط؛ظٹط± ظƒط§ظپظچ â€” ط§ظ„ظ…طھط§ط­: {avail} {item.unit}"
 
         tr = Transfer(
             ref_number        = gen_ref("TR"),
@@ -514,17 +538,22 @@ class TransferService:
             requested_by      = user_id,
             status            = "pending",
         )
+        # auto-assign active approval chain for transfers
+        chain = ApprovalChain.query.filter_by(target_type="transfer", is_active=True).first()
+        if chain:
+            tr.approval_chain_id = chain.id
+            tr.current_step = 0
         db.session.add(tr)
         db.session.flush()
 
         NotificationService.push(
             "transfer_request",
-            f"🔄 طلب تحويل: {item.name}",
-            f"طلب {qty} {item.unit} من {tr.from_wh.name} إلى {tr.to_wh.name}",
+            f"ًں”„ ط·ظ„ط¨ طھط­ظˆظٹظ„: {item.name}",
+            f"ط·ظ„ط¨ {qty} {item.unit} ظ…ظ† {tr.from_wh.name} ط¥ظ„ظ‰ {tr.to_wh.name}",
             ref_type="transfer", ref_id=tr.id,
         )
         AuditService.log("create","transfer",tr.id,
-                         f"طلب تحويل: {item.name} {qty}")
+                         f"ط·ظ„ط¨ طھط­ظˆظٹظ„: {item.name} {qty}")
         db.session.commit()
         return tr, None
 
@@ -532,14 +561,14 @@ class TransferService:
     def approve(transfer_id, approver_id):
         tr = Transfer.query.get(transfer_id)
         if not tr:
-            return None, "الطلب غير موجود"
+            return None, "ط§ظ„ط·ظ„ط¨ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         if tr.status != "pending":
-            return None, "تمت معالجة هذا الطلب مسبقاً"
+            return None, "طھظ…طھ ظ…ط¹ط§ظ„ط¬ط© ظ‡ط°ط§ ط§ظ„ط·ظ„ط¨ ظ…ط³ط¨ظ‚ط§ظ‹"
 
         sf = Stock.query.filter_by(item_id=tr.item_id,
                                     warehouse_id=tr.from_warehouse_id).first()
         if not sf or sf.quantity < tr.quantity:
-            return None, "الرصيد غير كافٍ لتنفيذ التحويل"
+            return None, "ط§ظ„ط±طµظٹط¯ ط؛ظٹط± ظƒط§ظپظچ ظ„طھظ†ظپظٹط° ط§ظ„طھط­ظˆظٹظ„"
 
         sf.quantity -= tr.quantity
         st = Stock.get_or_create(tr.item_id, tr.to_warehouse_id)
@@ -553,7 +582,7 @@ class TransferService:
             target_warehouse_id = tr.to_warehouse_id,
             quantity            = tr.quantity,
             user_id             = approver_id,
-            notes               = f"تحويل معتمد — {tr.ref_number}",
+            notes               = f"طھط­ظˆظٹظ„ ظ…ط¹طھظ…ط¯ â€” {tr.ref_number}",
         )
         db.session.add(mov)
         db.session.flush()
@@ -563,7 +592,7 @@ class TransferService:
         tr.approved_at = datetime.datetime.utcnow()
         tr.movement_id = mov.id
 
-        AuditService.log("approve","transfer",transfer_id,f"اعتماد: {tr.ref_number}")
+        AuditService.log("approve","transfer",transfer_id,f"ط§ط¹طھظ…ط§ط¯: {tr.ref_number}")
         db.session.commit()
         NotificationService.check_low_stock(tr.item_id)
         return tr, None
@@ -572,23 +601,23 @@ class TransferService:
     def reject(transfer_id, approver_id, reason=""):
         tr = Transfer.query.get(transfer_id)
         if not tr:
-            return None, "الطلب غير موجود"
+            return None, "ط§ظ„ط·ظ„ط¨ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         if tr.status != "pending":
-            return None, "تمت معالجة هذا الطلب مسبقاً"
+            return None, "طھظ…طھ ظ…ط¹ط§ظ„ط¬ط© ظ‡ط°ط§ ط§ظ„ط·ظ„ط¨ ظ…ط³ط¨ظ‚ط§ظ‹"
 
         tr.status        = "rejected"
         tr.approved_by   = approver_id
         tr.approved_at   = datetime.datetime.utcnow()
         tr.reject_reason = reason
 
-        AuditService.log("reject","transfer",transfer_id,f"رفض: {tr.ref_number}")
+        AuditService.log("reject","transfer",transfer_id,f"ط±ظپط¶: {tr.ref_number}")
         db.session.commit()
         return tr, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  INVENTORY COUNT SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class CountService:
     @staticmethod
     def get_list():
@@ -598,9 +627,9 @@ class CountService:
     def create(data, user_id):
         wh_id = data.get("warehouse_id")
         if not wh_id:
-            return None, "المخزن مطلوب"
+            return None, "ط§ظ„ظ…ط®ط²ظ† ظ…ط·ظ„ظˆط¨"
         if InventoryCount.query.filter_by(warehouse_id=wh_id, status="active").first():
-            return None, "يوجد جلسة جرد نشطة لهذا المخزن"
+            return None, "ظٹظˆط¬ط¯ ط¬ظ„ط³ط© ط¬ط±ط¯ ظ†ط´ط·ط© ظ„ظ‡ط°ط§ ط§ظ„ظ…ط®ط²ظ†"
 
         count = InventoryCount(
             ref_number    = gen_ref("CNT"),
@@ -618,7 +647,7 @@ class CountService:
                     system_quantity=s.quantity,
                 ))
 
-        AuditService.log("create","count",count.id,f"بدء جرد: {count.ref_number}")
+        AuditService.log("create","count",count.id,f"ط¨ط¯ط، ط¬ط±ط¯: {count.ref_number}")
         db.session.commit()
         return count, None
 
@@ -626,7 +655,7 @@ class CountService:
     def update_line(count_id, line_id, actual_qty, notes=""):
         line = InventoryCountLine.query.get(line_id)
         if not line or line.count_id != count_id:
-            return None, "السطر غير موجود"
+            return None, "ط§ظ„ط³ط·ط± ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         line.actual_quantity = float(actual_qty)
         line.notes           = notes
         db.session.commit()
@@ -636,9 +665,9 @@ class CountService:
     def complete(count_id, user_id):
         count = InventoryCount.query.get(count_id)
         if not count:
-            return None, "الجلسة غير موجودة"
+            return None, "ط§ظ„ط¬ظ„ط³ط© ط؛ظٹط± ظ…ظˆط¬ظˆط¯ط©"
         if count.status != "active":
-            return None, "الجلسة غير نشطة"
+            return None, "ط§ظ„ط¬ظ„ط³ط© ط؛ظٹط± ظ†ط´ط·ط©"
 
         diffs = 0
         for line in count.lines:
@@ -653,7 +682,7 @@ class CountService:
                     warehouse_id = count.warehouse_id,
                     quantity     = abs(diff),
                     user_id      = user_id,
-                    notes        = f"تسوية جرد — {count.ref_number}",
+                    notes        = f"طھط³ظˆظٹط© ط¬ط±ط¯ â€” {count.ref_number}",
                 ))
                 diffs += 1
 
@@ -663,20 +692,20 @@ class CountService:
         if diffs > 0:
             NotificationService.push(
                 "count_diff",
-                f"⚖️ فروقات جرد: {count.warehouse.name}",
-                f"{diffs} فروقات في {count.ref_number}",
+                f"âڑ–ï¸ڈ ظپط±ظˆظ‚ط§طھ ط¬ط±ط¯: {count.warehouse.name}",
+                f"{diffs} ظپط±ظˆظ‚ط§طھ ظپظٹ {count.ref_number}",
                 ref_type="count", ref_id=count.id,
             )
 
         AuditService.log("complete","count",count_id,
-                         f"إغلاق جرد: {count.ref_number} — {diffs} فروقات")
+                         f"ط¥ط؛ظ„ط§ظ‚ ط¬ط±ط¯: {count.ref_number} â€” {diffs} ظپط±ظˆظ‚ط§طھ")
         db.session.commit()
         return {"differences": diffs, "count": count}, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  SUPPLIER SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class SupplierService:
     @staticmethod
     def get_list(search=""):
@@ -690,7 +719,7 @@ class SupplierService:
     @staticmethod
     def create(data):
         if not data.get("name"):
-            return None, "اسم المورد مطلوب"
+            return None, "ط§ط³ظ… ط§ظ„ظ…ظˆط±ط¯ ظ…ط·ظ„ظˆط¨"
         s = Supplier(
             code          = data.get("code") or gen_ref("SUP"),
             name          = data["name"],
@@ -699,12 +728,12 @@ class SupplierService:
             email         = data.get("email"),
             address       = data.get("address"),
             tax_number    = data.get("tax_number"),
-            payment_terms = data.get("payment_terms", "نقداً"),
+            payment_terms = data.get("payment_terms", "ظ†ظ‚ط¯ط§ظ‹"),
             rating        = data.get("rating", 3),
             notes         = data.get("notes"),
         )
         db.session.add(s)
-        AuditService.log("create","supplier",None,f"مورد: {s.name}")
+        AuditService.log("create","supplier",None,f"ظ…ظˆط±ط¯: {s.name}")
         db.session.commit()
         return s, None
 
@@ -712,19 +741,19 @@ class SupplierService:
     def update(supplier_id, data):
         s = Supplier.query.get(supplier_id)
         if not s:
-            return None, "المورد غير موجود"
+            return None, "ط§ظ„ظ…ظˆط±ط¯ ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         for f in ["name","category","phone","email","address",
                   "tax_number","payment_terms","rating","is_active","notes"]:
             if f in data:
                 setattr(s, f, data[f])
-        AuditService.log("update","supplier",supplier_id,f"تحديث: {s.name}")
+        AuditService.log("update","supplier",supplier_id,f"طھط­ط¯ظٹط«: {s.name}")
         db.session.commit()
         return s, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  USER SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class UserService:
     @staticmethod
     def get_list():
@@ -733,15 +762,15 @@ class UserService:
     @staticmethod
     def create(data):
         errs = {}
-        if not data.get("name"):     errs["name"]     = "الاسم مطلوب"
-        if not data.get("username"): errs["username"]  = "اسم المستخدم مطلوب"
-        if not data.get("password"): errs["password"]  = "كلمة المرور مطلوبة"
+        if not data.get("name"):     errs["name"]     = "ط§ظ„ط§ط³ظ… ظ…ط·ظ„ظˆط¨"
+        if not data.get("username"): errs["username"]  = "ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… ظ…ط·ظ„ظˆط¨"
+        if not data.get("password"): errs["password"]  = "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ظ…ط·ظ„ظˆط¨ط©"
         elif len(data["password"]) < 6:
-            errs["password"] = "كلمة المرور يجب أن تكون 6 أحرف على الأقل"
+            errs["password"] = "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ظٹط¬ط¨ ط£ظ† طھظƒظˆظ† 6 ط£ط­ط±ظپ ط¹ظ„ظ‰ ط§ظ„ط£ظ‚ظ„"
         if errs:
             return None, errs
         if User.query.filter_by(username=data["username"]).first():
-            return None, {"username": "اسم المستخدم مستخدم مسبقاً"}
+            return None, {"username": "ط§ط³ظ… ط§ظ„ظ…ط³طھط®ط¯ظ… ظ…ط³طھط®ط¯ظ… ظ…ط³ط¨ظ‚ط§ظ‹"}
 
         u = User(
             name         = data["name"],
@@ -752,37 +781,37 @@ class UserService:
         )
         u.set_password(data["password"])
         db.session.add(u)
-        AuditService.log("create","user",None,f"مستخدم: {u.name}")
+        AuditService.log("create","user",None,f"ظ…ط³طھط®ط¯ظ…: {u.name}")
         db.session.commit()
         return u, None
 
     @staticmethod
     def update(user_id, data, current_user_id):
         if user_id == current_user_id and data.get("is_active") is False:
-            return None, "لا يمكنك تعطيل حسابك الخاص"
+            return None, "ظ„ط§ ظٹظ…ظƒظ†ظƒ طھط¹ط·ظٹظ„ ط­ط³ط§ط¨ظƒ ط§ظ„ط®ط§طµ"
         u = User.query.get(user_id)
         if not u:
-            return None, "المستخدم غير موجود"
+            return None, "ط§ظ„ظ…ط³طھط®ط¯ظ… ط؛ظٹط± ظ…ظˆط¬ظˆط¯"
         for f in ["name","email","role","warehouse_id","is_active"]:
             if f in data:
                 setattr(u, f, data[f])
         if data.get("password"):
             if len(data["password"]) < 6:
-                return None, "كلمة المرور قصيرة جداً"
+                return None, "ظƒظ„ظ…ط© ط§ظ„ظ…ط±ظˆط± ظ‚طµظٹط±ط© ط¬ط¯ط§ظ‹"
             u.set_password(data["password"])
-        AuditService.log("update","user",user_id,f"تحديث: {u.name}")
+        AuditService.log("update","user",user_id,f"طھط­ط¯ظٹط«: {u.name}")
         db.session.commit()
         return u, None
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  PURCHASE ORDER SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 # procurement logic moved to routes.py
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  STOCK INQUIRY SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class StockInquiryService:
     @staticmethod
     def search(query=""):
@@ -811,9 +840,9 @@ class StockInquiryService:
         return {"items": result, "warehouses": [w.to_dict() for w in whs]}
 
 
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  REPORT SERVICE
-# ══════════════════════════════════════════════════════════════
+# â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 class ReportService:
     @staticmethod
     def balance():
@@ -847,13 +876,13 @@ class ReportService:
         try:
             d = dt.datetime.strptime(date_from, "%Y-%m-%d").date()
         except ValueError:
-            return None, "تاريخ غير صحيح"
+            return None, "طھط§ط±ظٹط® ط؛ظٹط± طµط­ظٹط­"
         q = StockMovement.query
         if date_to:
             try:
                 d2 = dt.datetime.strptime(date_to, "%Y-%m-%d").date() + dt.timedelta(days=1)
             except ValueError:
-                return None, "تاريخ النهاية غير صحيح"
+                return None, "طھط§ط±ظٹط® ط§ظ„ظ†ظ‡ط§ظٹط© ط؛ظٹط± طµط­ظٹط­"
             q = q.filter(StockMovement.created_at >= d, StockMovement.created_at < d2)
         else:
             q = q.filter(func.date(StockMovement.created_at) == d)
@@ -911,7 +940,7 @@ class ReportService:
             result.append({
                 "id":p.id,"name":p.name,"code":p.code or "",
                 "client":p.client or "","status":p.status,
-                "status_label":"نشط" if p.status=="active" else "متوقف",
+                "status_label":"ظ†ط´ط·" if p.status=="active" else "ظ…طھظˆظ‚ظپ",
                 "budget":p.budget or 0,
                 "spent":spent,
                 "remaining":round(p.budget - spent,2) if p.budget else -spent,
@@ -956,16 +985,16 @@ class ReportService:
         ws.sheet_view.rightToLeft = True
 
         if report_type == "balance":
-            ws.title = "رصيد المخازن"
+            ws.title = "ط±طµظٹط¯ ط§ظ„ظ…ط®ط§ط²ظ†"
             whs = Warehouse.query.filter_by(is_active=True).all()
             ws.merge_cells(f"A1:{get_column_letter(5+len(whs))}1")
-            ws["A1"] = f"تقرير رصيد المخازن — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"طھظ‚ط±ظٹط± ط±طµظٹط¯ ط§ظ„ظ…ط®ط§ط²ظ† â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
 
-            headers = ["الكود","الصنف","الفئة","الوحدة"] + \
-                      [wh.name for wh in whs] + ["الإجمالي","القيمة (ر.س)","الحالة"]
+            headers = ["ط§ظ„ظƒظˆط¯","ط§ظ„طµظ†ظپ","ط§ظ„ظپط¦ط©","ط§ظ„ظˆط­ط¯ط©"] + \
+                      [wh.name for wh in whs] + ["ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ","ط§ظ„ظ‚ظٹظ…ط© (ط±.ط³)","ط§ظ„ط­ط§ظ„ط©"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1000,14 +1029,14 @@ class ReportService:
                     sc.font=Font(color="CA6F1E",bold=True)
 
         elif report_type == "movements":
-            ws.title = "سجل الحركات"
-            headers = ["#","التاريخ","الوقت","الصنف","النوع","الكمية",
-                       "الوحدة","المخزن","المنفذ","المرجع","المشروع","المهندس","ملاحظات"]
+            ws.title = "ط³ط¬ظ„ ط§ظ„ط­ط±ظƒط§طھ"
+            headers = ["#","ط§ظ„طھط§ط±ظٹط®","ط§ظ„ظˆظ‚طھ","ط§ظ„طµظ†ظپ","ط§ظ„ظ†ظˆط¹","ط§ظ„ظƒظ…ظٹط©",
+                       "ط§ظ„ظˆط­ط¯ط©","ط§ظ„ظ…ط®ط²ظ†","ط§ظ„ظ…ظ†ظپط°","ط§ظ„ظ…ط±ط¬ط¹","ط§ظ„ظ…ط´ط±ظˆط¹","ط§ظ„ظ…ظ‡ظ†ط¯ط³","ظ…ظ„ط§ط­ط¸ط§طھ"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=1, column=col, value=h)
             style_header(1, len(headers))
-            tmap = {"in":"وارد","out":"صرف","transfer":"تحويل","adjustment":"تسوية",
-                    "return":"مرتجع","damage":"هالك"}
+            tmap = {"in":"ظˆط§ط±ط¯","out":"طµط±ظپ","transfer":"طھط­ظˆظٹظ„","adjustment":"طھط³ظˆظٹط©",
+                    "return":"ظ…ط±طھط¬ط¹","damage":"ظ‡ط§ظ„ظƒ"}
             for ri, m in enumerate(
                 StockMovement.query.order_by(StockMovement.created_at.desc()).limit(1000).all(), 2
             ):
@@ -1026,8 +1055,8 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "transfers":
-            ws.title = "التحويلات"
-            headers = ["#","رقم المرجع","الصنف","الكمية","الوحدة","من مخزن","إلى مخزن","الطالب","التاريخ","السبب","الحالة"]
+            ws.title = "ط§ظ„طھط­ظˆظٹظ„ط§طھ"
+            headers = ["#","ط±ظ‚ظ… ط§ظ„ظ…ط±ط¬ط¹","ط§ظ„طµظ†ظپ","ط§ظ„ظƒظ…ظٹط©","ط§ظ„ظˆط­ط¯ط©","ظ…ظ† ظ…ط®ط²ظ†","ط¥ظ„ظ‰ ظ…ط®ط²ظ†","ط§ظ„ط·ط§ظ„ط¨","ط§ظ„طھط§ط±ظٹط®","ط§ظ„ط³ط¨ط¨","ط§ظ„ط­ط§ظ„ط©"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=1, column=col, value=h)
             style_header(1, len(headers))
@@ -1048,8 +1077,8 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "diffs":
-            ws.title = "فروقات الجرد"
-            headers = ["#","الصنف","كود الصنف","المخزن","كمية النظام","الكمية الفعلية","الفرق","ملاحظات","تاريخ الجرد"]
+            ws.title = "ظپط±ظˆظ‚ط§طھ ط§ظ„ط¬ط±ط¯"
+            headers = ["#","ط§ظ„طµظ†ظپ","ظƒظˆط¯ ط§ظ„طµظ†ظپ","ط§ظ„ظ…ط®ط²ظ†","ظƒظ…ظٹط© ط§ظ„ظ†ط¸ط§ظ…","ط§ظ„ظƒظ…ظٹط© ط§ظ„ظپط¹ظ„ظٹط©","ط§ظ„ظپط±ظ‚","ظ…ظ„ط§ط­ط¸ط§طھ","طھط§ط±ظٹط® ط§ظ„ط¬ط±ط¯"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=1, column=col, value=h)
             style_header(1, len(headers))
@@ -1075,13 +1104,13 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "budget":
-            ws.title = "الميزانية"
+            ws.title = "ط§ظ„ظ…ظٹط²ط§ظ†ظٹط©"
             ws.merge_cells("A1:H1")
-            ws["A1"] = f"تقرير ميزانية المشاريع — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"طھظ‚ط±ظٹط± ظ…ظٹط²ط§ظ†ظٹط© ط§ظ„ظ…ط´ط§ط±ظٹط¹ â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["المشروع","الكود","العميل","الميزانية","المنصرف","المتبقي","الاستخدام %","الحالة"]
+            headers = ["ط§ظ„ظ…ط´ط±ظˆط¹","ط§ظ„ظƒظˆط¯","ط§ظ„ط¹ظ…ظٹظ„","ط§ظ„ظ…ظٹط²ط§ظ†ظٹط©","ط§ظ„ظ…ظ†طµط±ظپ","ط§ظ„ظ…طھط¨ظ‚ظٹ","ط§ظ„ط§ط³طھط®ط¯ط§ظ… %","ط§ظ„ط­ط§ظ„ط©"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1096,7 +1125,7 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
             # summary row
             sr = ri + 1
-            ws.cell(row=sr, column=1, value="الإجمالي").font = Font(bold=True)
+            ws.cell(row=sr, column=1, value="ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ").font = Font(bold=True)
             ws.cell(row=sr, column=4, value=data["summary"]["total_budget"]).number_format = '#,##0.00'
             ws.cell(row=sr, column=5, value=data["summary"]["total_spent"]).number_format = '#,##0.00'
             ws.cell(row=sr, column=6, value=data["summary"]["total_remaining"]).number_format = '#,##0.00'
@@ -1105,13 +1134,13 @@ class ReportService:
                 ws.cell(row=sr, column=c).font = Font(bold=True)
 
         elif report_type == "consumption":
-            ws.title = "الاستهلاك"
+            ws.title = "ط§ظ„ط§ط³طھظ‡ظ„ط§ظƒ"
             ws.merge_cells("A1:F1")
-            ws["A1"] = f"تقرير الاستهلاك — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"طھظ‚ط±ظٹط± ط§ظ„ط§ط³طھظ‡ظ„ط§ظƒ â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["الصنف","الكود","الكمية المستهلكة","القيمة","عدد الحركات","متوسط اليوم"]
+            headers = ["ط§ظ„طµظ†ظپ","ط§ظ„ظƒظˆط¯","ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط³طھظ‡ظ„ظƒط©","ط§ظ„ظ‚ظٹظ…ط©","ط¹ط¯ط¯ ط§ظ„ط­ط±ظƒط§طھ","ظ…طھظˆط³ط· ط§ظ„ظٹظˆظ…"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1135,13 +1164,13 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "fastslow":
-            ws.title = "سريع/بطيء"
+            ws.title = "ط³ط±ظٹط¹/ط¨ط·ظٹط،"
             ws.merge_cells("A1:D1")
-            ws["A1"] = f"الأصناف سريعة/بطيئة الحركة — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"ط§ظ„ط£طµظ†ط§ظپ ط³ط±ظٹط¹ط©/ط¨ط·ظٹط¦ط© ط§ظ„ط­ط±ظƒط© â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["النوع","الصنف","الكمية المستهلكة","المخزون الحالي"]
+            headers = ["ط§ظ„ظ†ظˆط¹","ط§ظ„طµظ†ظپ","ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط³طھظ‡ظ„ظƒط©","ط§ظ„ظ…ط®ط²ظˆظ† ط§ظ„ط­ط§ظ„ظٹ"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1160,24 +1189,24 @@ class ReportService:
             slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:10]
             ri = 3
             for i in fast:
-                rd = ["سريع الحركة", i[1], int(i[3]), int(i[4])]
+                rd = ["ط³ط±ظٹط¹ ط§ظ„ط­ط±ظƒط©", i[1], int(i[3]), int(i[4])]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0); ri += 1
             for i in slow:
-                rd = ["بطيء الحركة", i[1], int(i[3]), int(i[4])]
+                rd = ["ط¨ط·ظٹط، ط§ظ„ط­ط±ظƒط©", i[1], int(i[3]), int(i[4])]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0); ri += 1
 
         elif report_type == "supplier_perf":
-            ws.title = "أداء الموردين"
+            ws.title = "ط£ط¯ط§ط، ط§ظ„ظ…ظˆط±ط¯ظٹظ†"
             ws.merge_cells("A1:G1")
-            ws["A1"] = f"تقرير أداء الموردين — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"طھظ‚ط±ظٹط± ط£ط¯ط§ط، ط§ظ„ظ…ظˆط±ط¯ظٹظ† â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["المورد","أوامر الشراء","الإجمالي","الإستلامات","دقة التسليم","الجودة","المعدل"]
+            headers = ["ط§ظ„ظ…ظˆط±ط¯","ط£ظˆط§ظ…ط± ط§ظ„ط´ط±ط§ط،","ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹ","ط§ظ„ط¥ط³طھظ„ط§ظ…ط§طھ","ط¯ظ‚ط© ط§ظ„طھط³ظ„ظٹظ…","ط§ظ„ط¬ظˆط¯ط©","ط§ظ„ظ…ط¹ط¯ظ„"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1205,13 +1234,13 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "valuation":
-            ws.title = "تقييم المخزون"
+            ws.title = "طھظ‚ظٹظٹظ… ط§ظ„ظ…ط®ط²ظˆظ†"
             ws.merge_cells("A1:F1")
-            ws["A1"] = f"تقييم المخزون (FIFO) — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"طھظ‚ظٹظٹظ… ط§ظ„ظ…ط®ط²ظˆظ† (FIFO) â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["الصنف","الكود","الكمية الإجمالية","متوسط التكلفة","القيمة الإجمالية","عدد الطبقات"]
+            headers = ["ط§ظ„طµظ†ظپ","ط§ظ„ظƒظˆط¯","ط§ظ„ظƒظ…ظٹط© ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹط©","ظ…طھظˆط³ط· ط§ظ„طھظƒظ„ظپط©","ط§ظ„ظ‚ظٹظ…ط© ط§ظ„ط¥ط¬ظ…ط§ظ„ظٹط©","ط¹ط¯ط¯ ط§ظ„ط·ط¨ظ‚ط§طھ"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1228,13 +1257,13 @@ class ReportService:
 
         elif report_type == "audit":
             from app.services import AuditService
-            ws.title = "سجل الأوديت"
+            ws.title = "ط³ط¬ظ„ ط§ظ„ط£ظˆط¯ظٹطھ"
             ws.merge_cells("A1:I1")
-            ws["A1"] = f"سجل تدقيق النظام — {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"] = f"ط³ط¬ظ„ طھط¯ظ‚ظٹظ‚ ط§ظ„ظ†ط¸ط§ظ… â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
             ws["A1"].alignment = ca
             ws.row_dimensions[1].height = 28
-            headers = ["#","التاريخ","المستخدم","الإجراء","العنصر","الوصف","IP","البيانات القديمة","البيانات الجديدة"]
+            headers = ["#","ط§ظ„طھط§ط±ظٹط®","ط§ظ„ظ…ط³طھط®ط¯ظ…","ط§ظ„ط¥ط¬ط±ط§ط،","ط§ظ„ط¹ظ†طµط±","ط§ظ„ظˆطµظپ","IP","ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ظ‚ط¯ظٹظ…ط©","ط§ظ„ط¨ظٹط§ظ†ط§طھ ط§ظ„ط¬ط¯ظٹط¯ط©"]
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
@@ -1244,6 +1273,54 @@ class ReportService:
                       f"{l.resource}#{l.resource_id}" if l.resource_id else l.resource,
                       l.description or "", l.ip_address or "",
                       l.old_data or "", l.new_data or ""]
+                for col, val in enumerate(rd, 1):
+                    ws.cell(row=ri, column=col, value=val)
+                style_row(ri, len(headers), alt=ri%2==0)
+
+        elif report_type == "abc":
+            ws.title = "طھط­ظ„ظٹظ„ ABC"
+            ws.merge_cells("A1:F1")
+            ws["A1"] = f"طھط­ظ„ظٹظ„ ABC ظ„ظ„ظ…ط®ط²ظˆظ† â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
+            ws["A1"].alignment = ca
+            ws.row_dimensions[1].height = 28
+            headers = ["ظƒظˆط¯ ط§ظ„طµظ†ظپ","ط§ظ„طµظ†ظپ","ط§ظ„ظپط¦ط©","ط§ظ„ظˆط­ط¯ط©","ط¥ط¬ظ…ط§ظ„ظٹ ط§ظ„ظƒظ…ظٹط©","ط³ط¹ط± ط§ظ„ظˆط­ط¯ط©","ط§ظ„ظ‚ظٹظ…ط©","%","طھط±ط§ظƒظ…ظٹ %","ط§ظ„طھطµظ†ظٹظپ"]
+            for col, h in enumerate(headers, 1):
+                ws.cell(row=2, column=col, value=h)
+            style_header(2, len(headers))
+            from app.routes import abc_analysis
+            with current_app.test_request_context():
+                resp = abc_analysis()
+                result = resp.get_json()["data"]
+            for ri, i in enumerate(result.get("items", []), 3):
+                rd = [i["item_code"], i["item_name"], i["category"], i["unit"],
+                      i["total_stock"], i["unit_price"], i["total_value"],
+                      f"{i['pct']}%", f"{i['cumulative_pct']}%", i["class"]]
+                for col, val in enumerate(rd, 1):
+                    ws.cell(row=ri, column=col, value=val)
+                style_row(ri, len(headers), alt=ri%2==0)
+
+        elif report_type == "aging":
+            ws.title = "ط¹ظ…ط± ط§ظ„ظ…ط®ط²ظˆظ†"
+            ws.merge_cells("A1:L1")
+            ws["A1"] = f"طھظ‚ط±ظٹط± ط¹ظ…ط± ط§ظ„ظ…ط®ط²ظˆظ† â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
+            ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
+            ws["A1"].alignment = ca
+            ws.row_dimensions[1].height = 28
+            headers = ["ظƒظˆط¯ ط§ظ„طµظ†ظپ","ط§ظ„طµظ†ظپ","ط§ظ„ظˆط­ط¯ط©","ط§ظ„ظƒظ…ظٹط©","ط§ظ„ظ‚ظٹظ…ط©","ط£ظ‚ط¯ظ… ظٹظˆظ…","0-30","31-60","61-90","91-180","181-365","365+"]
+            for col, h in enumerate(headers, 1):
+                ws.cell(row=2, column=col, value=h)
+            style_header(2, len(headers))
+            from app.routes import inventory_aging
+            with current_app.test_request_context():
+                resp = inventory_aging()
+                result = resp.get_json()["data"]
+            for ri, i in enumerate(result.get("items", []), 3):
+                b = i.get("qty_buckets",{})
+                rd = [i["item_code"], i["item_name"], i["unit"],
+                      i["total_qty"], i["total_value"], f"{i['oldest_days']} ظٹظˆظ…",
+                      b.get("0-30",0), b.get("31-60",0), b.get("61-90",0),
+                      b.get("91-180",0), b.get("181-365",0), b.get("365+",0)]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0)

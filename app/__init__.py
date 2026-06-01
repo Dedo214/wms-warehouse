@@ -134,6 +134,47 @@ def _init_scheduler(app):
                 except: pass
         interval = int((app.config.get("BACKUP_INTERVAL_HOURS",24))) * 3600
         sched.add_job(auto_backup_job, "interval", seconds=interval, id="auto_backup", replace_existing=True)
+
+        def cleanup_layers_job():
+            with app.app_context():
+                try:
+                    from app.models import InventoryLayer
+                    deleted = InventoryLayer.query.filter(InventoryLayer.quantity == 0).delete()
+                    if deleted:
+                        db.session.commit()
+                except: pass
+
+        sched.add_job(cleanup_layers_job, "interval", days=7, id="cleanup_layers", replace_existing=True)
+
+        def auto_create_counts_job():
+            with app.app_context():
+                try:
+                    from app.models import ScheduledCount, InventoryCount, Warehouse, Item, Stock, InventoryCountLine
+                    today = datetime.datetime.utcnow()
+                    schedules = ScheduledCount.query.filter_by(is_active=True).all()
+                    for sc in schedules:
+                        if sc.last_created and (today - sc.last_created).days < 20: continue
+                        if sc.frequency == "monthly" and today.day != sc.day_of_month: continue
+                        sc.last_created = today
+                        wh = Warehouse.query.get(sc.warehouse_id)
+                        if not wh: continue
+                        ref = f"SC-{today.strftime('%Y%m%d')}-{wh.code or wh.id}"
+                        existing = InventoryCount.query.filter_by(ref_number=ref).first()
+                        if existing: continue
+                        cnt = InventoryCount(ref_number=ref, warehouse_id=wh.id,
+                            supervisor_id=None, notes=f"جرد دوري ({sc.frequency})")
+                        db.session.add(cnt); db.session.flush()
+                        items = Item.query.filter_by(is_active=True).all()
+                        for it in items:
+                            stk = Stock.query.filter_by(item_id=it.id, warehouse_id=wh.id).first()
+                            if stk and stk.quantity > 0:
+                                db.session.add(InventoryCountLine(
+                                    count_id=cnt.id, item_id=it.id,
+                                    system_quantity=stk.quantity))
+                        db.session.commit()
+                except: pass
+
+        sched.add_job(auto_create_counts_job, "interval", hours=12, id="auto_create_counts", replace_existing=True)
         sched.start()
     except ImportError:
         app.logger.warning("APScheduler not installed — auto backup disabled")
@@ -159,6 +200,17 @@ def _migrate(db):
     _add_col("purchase_orders","total_amount","FLOAT DEFAULT 0.0")
     if not _column_exists("project_invoices","ref_number"):
         db.create_all()
+    _add_col("items","image_url","VARCHAR(500)")
+    _add_col("stock_movements","lot_number","VARCHAR(100)")
+    _add_col("transfers","approval_chain_id","INTEGER")
+    _add_col("transfers","current_step","INTEGER DEFAULT 0")
+    _add_col("purchase_orders","approval_chain_id","INTEGER")
+    _add_col("purchase_orders","current_step","INTEGER DEFAULT 0")
+    # ensure newer tables exist
+    for t in ["lots","unit_conversions","approval_chains","approval_steps"]:
+        if not _column_exists(t,"id"):
+            db.create_all()
+            break
 
 def _seed(app):
     if User.query.count() > 0: return

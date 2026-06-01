@@ -13,6 +13,14 @@ def _setup(client, auth):
                 headers=auth)
     return iid, wh1, wh2
 
+def _deactivate_chains(client, auth):
+    """Deactivate any active transfer approval chains so transfers don't auto-assign"""
+    r = client.get("/api/approval/chains?target_type=transfer", headers=auth)
+    for c in json.loads(r.data)["data"]:
+        if c.get("is_active"):
+            client.put(f"/api/approval/chains/{c['id']}",
+                       json={"is_active": False}, headers=auth)
+
 def test_transfers_list(client, auth):
     r = client.get("/api/transfers", headers=auth)
     assert r.status_code == 200
@@ -30,6 +38,7 @@ def test_create_transfer(client, auth):
     return d["data"]["id"]
 
 def test_approve_transfer(client, auth):
+    _deactivate_chains(client, auth)
     iid, wh1, wh2 = _setup(client, auth)
     r = client.post("/api/transfers",
                     json={"item_id":iid,"from_warehouse_id":wh1,
