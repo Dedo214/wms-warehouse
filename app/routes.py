@@ -10,6 +10,7 @@ from flask_jwt_extended import (
     create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity,
 )
+from sqlalchemy import func
 from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
 from app.models import (
@@ -23,6 +24,7 @@ from app.models import (
     PurchaseOrder, POItem,
     GoodsReceipt, GRNItem,
     PurchaseReturn, PReturnItem, SaleOrder, SaleItem,
+    StockMovement,
     SupplierEvaluation, SupplierProfile, InventoryLayer,
     Lot, UnitConversion, ApprovalChain, ApprovalStep, ScheduledCount,
 )
@@ -3605,3 +3607,79 @@ def supplier_upload_doc():
     f.save(os.path.join(upload_dir, filename))
     AuditService.log("upload", "supplier_document", user.supplier_id, f"مستند: {f.filename}")
     return ok({"filename": filename}, message="✅ تم رفع المستند")
+
+# ══════════════════════════════════════════════════════════════
+#  AI ASSISTANT
+# ══════════════════════════════════════════════════════════════
+@api.route("/ai/query", methods=["POST"])
+@jwt_required()
+def ai_query():
+    data = request.get_json() or {}
+    q = (data.get("query") or "").strip()
+    if not q: return err("السؤال مطلوب")
+    ql = q.lower()
+    # Specific intents first
+    if any(w in ql for w in ["حركة","حركات","movement","صرف","إدخال","وارد","أخر"]):
+        recent = StockMovement.query.order_by(StockMovement.created_at.desc()).limit(5).all()
+        lines = "\n".join([f"• {'🟢' if m.type in ('in','transfer_in') else '🔴'} {m.type} {m.quantity:.0f} {m.item.name if m.item else ''} ({m.created_at.strftime('%m/%d')})" for m in recent])
+        return ok({"answer":f"آخر 5 حركات:\n{lines}"})
+    if any(w in ql for w in ["مبيعات","sales","بيع","فاتورة"]):
+        total_sales = db.session.query(func.sum(SaleOrder.total)).filter(SaleOrder.status!="cancelled").scalar() or 0
+        count = SaleOrder.query.filter(SaleOrder.status!="cancelled").count()
+        return ok({"answer":f"إجمالي المبيعات: {count} فاتورة بقيمة {total_sales:,.2f} ر.س"})
+    if any(w in ql for w in ["منخفض","critical","حرج","نفذ","low","ناقص"]):
+        all_items = Item.query.filter(Item.min_quantity > 0).all()
+        crit = [i for i in all_items if i.get_total_stock() < i.min_quantity]
+        names = "\n".join([f"• {i.name} ({i.get_total_stock():.0f}/{i.min_quantity:.0f})" for i in crit[:10]])
+        return ok({"answer":f"أصناف منخفضة ({len(crit)}):\n{names or '— لا يوجد'}"})
+    if any(w in ql for w in ["صنف","item","items","أصناف"]):
+        items = Item.query.filter_by(is_active=True).count()
+        total_stock = db.session.query(func.sum(Stock.quantity)).scalar() or 0
+        return ok({"answer":f"إجمالي الأصناف النشطة: {items} صنف | إجمالي المخزون: {total_stock:,.0f} وحدة"})
+    # Generic totals
+    items = Item.query.filter_by(is_active=True).count()
+    total_stock = db.session.query(func.sum(Stock.quantity)).scalar() or 0
+    return ok({"answer":f"إجمالي الأصناف: {items} | المخزون: {total_stock:,.0f} وحدة"})
+    return ok({"answer":"أستطيع الإجابة عن: المخزون، الأصناف، الحركات، المبيعات، الأصناف المنخفضة. جرب سؤالاً!"})
+
+@api.route("/ai/analyze", methods=["GET"])
+@jwt_required()
+def ai_analyze():
+    items = Item.query.filter_by(is_active=True).count()
+    total_stock = db.session.query(func.sum(Stock.quantity)).scalar() or 0
+    stocks = Stock.query.options(db.joinedload(Stock.item)).all()
+    total_val = sum(s.quantity * (s.item.unit_price or 0) for s in stocks if s.item)
+    all_its = Item.query.filter(Item.min_quantity > 0).all()
+    critical = sum(1 for i in all_its if i.get_total_stock() < i.min_quantity)
+    sales = db.session.query(func.sum(SaleOrder.total)).filter(SaleOrder.status!="cancelled").scalar() or 0
+    return ok({
+        "summary":f"📊 {items} صنف، {total_stock:,.0f} وحدة، {total_val:,.2f} ر.س قيمة، {critical} حرج، {sales:,.2f} ر.س مبيعات",
+        "items":items,"total_stock":total_stock,"total_value":total_val,
+        "critical":critical,"sales_total":sales,
+        "recommendations":[
+            "📦 راجع الأصناف منخفضة المخزون لتجنب نفادها",
+            "🔄 جدول جرد دوري للأصناف عالية القيمة",
+            "💰 راجع المبيعات الشهرية لتحديد الأصناف الأكثر طلباً",
+        ]})
+
+# ══════════════════════════════════════════════════════════════
+#  OCR — Document Scanning
+# ══════════════════════════════════════════════════════════════
+@api.route("/ocr/scan", methods=["POST"])
+@jwt_required()
+def ocr_scan():
+    if "file" not in request.files: return err("اختر ملف صورة")
+    f = request.files["file"]
+    if f.filename == "": return err("اسم الملف فارغ")
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError:
+        return err("مكتبة OCR غير مثبتة. قم بتشغيل: pip install pytesseract Pillow")
+    try:
+        img = Image.open(f)
+        text = pytesseract.image_to_string(img, lang="ara+eng")
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        return ok({"text":text,"lines":lines,"word_count":len(text.split())})
+    except Exception as e:
+        return err(f"فشل OCR: {str(e)[:100]}")

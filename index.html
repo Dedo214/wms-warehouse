@@ -132,6 +132,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 @media(max-width:768px){.sb{width:52px}.main{margin-right:52px}.fr2,.fr3{grid-template-columns:1fr}.content{padding:12px 10px}.tb{padding:0 10px}.mlg{max-width:100%;margin:0 4px}.modal{max-width:100%}.tb h1{font-size:13px}.uc{font-size:11px;padding:2px 6px}.uc span:not(.av){display:none}.tw{overflow-x:auto}.tc{bottom:10px;left:10px;right:10px}.toast{min-width:auto;max-width:100%}.ov{padding:6px}.mh{padding:14px 14px 0}.mb{padding:12px 14px}.mf{padding:0 14px 12px}}
 @media(max-width:480px){.s4,.s3,.s2{grid-template-columns:1fr}}
 @media print{.sb,.tb,.btn,.mf{display:none!important}.main{margin-right:0}.content{padding:0}}
+
+/* AI ASSISTANT */
+#ai-fab{position:fixed;bottom:20px;left:20px;z-index:999;width:52px;height:52px;background:var(--pr);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);transition:transform .2s,box-shadow .2s;border:none}#ai-fab:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(0,0,0,.35)}
+#ai-panel{position:fixed;bottom:80px;left:20px;width:360px;max-height:480px;background:var(--card);border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.2);z-index:999;display:none;flex-direction:column;overflow:hidden;border:1px solid var(--bdr)}
+#ai-panel.on{display:flex}
+.ai-h{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--pr);color:#fff;font-weight:600;font-size:14px}
+.ai-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;max-height:340px}
+.ai-msg{max-width:88%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.5;animation:tin .2s}
+.ai-bot{background:var(--prll);color:var(--txt);align-self:flex-start;border-bottom-left-radius:4px}
+.ai-user{background:var(--pr);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.ai-inp{display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--bdr);align-items:center}
+.ai-inp input{flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--bdr);background:var(--bg);color:var(--txt);font-size:13px}
+.ai-msg pre{white-space:pre-wrap;font-family:inherit;margin:0}
+@media(max-width:480px){#ai-panel{width:calc(100% - 32px);left:16px;bottom:76px;max-height:70vh}}
 </style>
 </head>
 <body>
@@ -1300,6 +1314,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 </div></div>
 
 <div class="tc" id="tc"></div>
+
+<!-- AI ASSISTANT -->
+<div id="ai-fab" onclick="toggleAI()" title="المساعد الذكي">🤖</div>
+<div id="ai-panel">
+  <div class="ai-h"><span>🧠 المساعد الذكي</span><button onclick="toggleAI()" style="background:none;border:none;color:inherit;font-size:18px;cursor:pointer">×</button></div>
+  <div id="ai-msgs" class="ai-msgs">
+    <div class="ai-msg ai-bot"><span>👋 مرحباً! اسألني عن المخزون، المبيعات، الأصناف المنخفضة، أو الحركات</span></div>
+  </div>
+  <div class="ai-inp">
+    <button id="ai-voice-btn" onclick="toggleVoice()" title="إدخال صوتي" style="background:none;border:none;font-size:20px;cursor:pointer;padding:4px">🎤</button>
+    <input type="text" id="ai-input" placeholder="اسأل سؤالاً..." onkeydown="if(event.key==='Enter')askAI()">
+    <button onclick="askAI()" style="background:var(--pr);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer">إرسال</button>
+  </div>
+</div>
 
 <script>
 // ══════════════════════════════════════════════
@@ -3202,6 +3230,54 @@ async function delSale(id){
   if(!confirm('حذف أمر البيع؟ لا يمكن التراجع'))return;
   const r=await $api('DELETE',`/api/sales/${id}`);if(!r?.success){toast(r?.error||'فشل الحذف','e');return;}
   toast('🗑️ تم الحذف','s');loadSales();
+}
+
+// ══════════════════════════════════════════════
+//  AI ASSISTANT
+// ══════════════════════════════════════════════
+let aiRecognition=null;
+function toggleAI(){
+  const p=document.getElementById('ai-panel');
+  p.classList.toggle('on');
+  if(p.classList.contains('on')){setTimeout(()=>document.getElementById('ai-input').focus(),300);}
+}
+async function askAI(){
+  const inp=document.getElementById('ai-input');const q=inp.value.trim();
+  if(!q)return;
+  addAIMsg(q,'user');inp.value='';
+  addAIMsg('جاري التفكير...','bot loading');
+  const r=await $api('POST','/api/ai/query',{query:q});
+  const msgs=document.getElementById('ai-msgs');
+  const loading=msgs.querySelector('.loading');if(loading)loading.remove();
+  if(r?.success){
+    addAIMsg(r.data.answer||'لم أفهم السؤال','bot');
+  } else {
+    addAIMsg('❌ '+(r?.error||'فشل الاتصال'),'bot');
+  }
+}
+function addAIMsg(text,cls){
+  const d=document.createElement('div');
+  d.className='ai-msg '+(cls||'bot');
+  d.innerHTML='<span>'+(cls==='user'?'🧑‍💼 ':'🤖 ')+text.replace(/\n/g,'<br>')+'</span>';
+  document.getElementById('ai-msgs').appendChild(d);
+  d.scrollIntoView({behavior:'smooth',block:'end'});
+}
+function toggleVoice(){
+  if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){
+    toast('المتصفح لا يدعم الإدخال الصوتي','e');return;
+  }
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(aiRecognition&&aiRecognition.running){aiRecognition.stop();document.getElementById('ai-voice-btn').textContent='🎤';return;}
+  aiRecognition=new SpeechRecognition();aiRecognition.lang='ar-SA';aiRecognition.continuous=false;aiRecognition.interimResults=false;
+  aiRecognition.onstart=()=>{document.getElementById('ai-voice-btn').textContent='🔴';};
+  aiRecognition.onerror=()=>{document.getElementById('ai-voice-btn').textContent='🎤';toast('لم يُسمع الصوت جيداً','e');};
+  aiRecognition.onresult=(e)=>{
+    const t=e.results[0][0].transcript;
+    document.getElementById('ai-input').value=t;
+    document.getElementById('ai-voice-btn').textContent='🎤';
+    askAI();
+  };
+  aiRecognition.start();
 }
 
 // Populate on modal open
