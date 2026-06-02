@@ -261,6 +261,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     <div class="ni" data-p="trans"><span class="ni-i">🔄</span><span class="nt" data-i18n="trans">التحويلات</span><span class="nbg" id="tr-nbg" style="display:none">0</span></div>
     <div class="ni" data-p="cnt"><span class="ni-i">🔢</span><span class="nt" data-i18n="cnt">الجرد</span></div>
     <div class="ni" data-p="stkq"><span class="ni-i">🔍</span><span class="nt" data-i18n="stkq">حالة المخزون</span></div>
+    <div class="ni" onclick="quickScan()"><span class="ni-i">📸</span><span class="nt">مسح سريع</span></div>
   </div></div>
   <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المشتريات</span></div><div class="ns">
     <div class="ni" data-p="purch"><span class="ni-i">🛒</span><span class="nt" data-i18n="purch">لوحة المشتريات</span></div>
@@ -362,7 +363,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
         <button class="tab" onclick="stab(this,'itabs');loadInv('warning')">🟡 تحذير</button>
       </div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
-        <div class="sw2"><input type="text" id="invs" placeholder="بحث..." style="width:190px" oninput="debouncedLoadInv()"><span class="swi">🔍</span></div>
+        <div class="sw2"><input type="text" id="invs" placeholder="بحث..." style="width:170px" oninput="debouncedLoadInv()"><span class="swi">🔍</span></div><button class="btn bo bxs" onclick="openBC(null,'invs')" title="مسح باركود">📸</button>
         <select style="width:auto" id="invcat" onchange="loadInv()"><option value="">كل الفئات</option></select>
         <button class="btn bp" onclick="openM('itmadd')">+ إضافة صنف</button>
         <button class="btn bo bsm" onclick="bulkLabelDialog()">📋 باركودات</button>
@@ -2448,6 +2449,7 @@ async function upAtt(tp,id){
 }
 let bcHtml5Reader=null;
 let bcLastCode='';
+function bcBeep(){try{const ac=new AudioContext(),o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=1200;g.gain.value=.3;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.12);setTimeout(()=>ac.close(),200);}catch(e){}}
 function openBC(selId,inpId){
   document.getElementById('bcresult').textContent='جاري تشغيل الكاميرا...';
   showM('ov-bcscanner');
@@ -2459,13 +2461,34 @@ function openBC(selId,inpId){
     function(code){
       bcHtml5Reader.stop().catch(()=>{});
       bcLastCode=code;
+      bcBeep();
       document.getElementById('bcresult').textContent=`تم المسح: ${code}`;
       if(inpId){
         const inp=document.getElementById(inpId);
-        if(inp){inp.value=code;}
+        if(inp){inp.value=code;if(inp.oninput)inp.oninput();}
       }
       closeBC();
       if(selId){bcLookup(inpId||'__bc_direct__',selId,code);}
+    },
+    function(){}
+  ).catch(function(err){
+    document.getElementById('bcresult').textContent='❌ فشل تشغيل الكاميرا: '+err;
+  });
+}
+async function quickScan(){
+  showM('ov-bcscanner');
+  document.getElementById('bcresult').textContent='جاري تشغيل الكاميرا...';
+  if(bcHtml5Reader){bcHtml5Reader.clear();bcHtml5Reader=null;}
+  bcHtml5Reader=new Html5Qrcode("bcreader");
+  bcHtml5Reader.start({facingMode:"environment"},
+    {fps:10,qrbox:{width:250,height:150}},
+    async function(code){
+      bcHtml5Reader.stop().catch(()=>{});
+      bcBeep();
+      document.getElementById('bcresult').textContent=`تم المسح: ${code}`;
+      const r=await $api('GET',`/api/items/scan/${encodeURIComponent(code)}`);
+      closeBC();
+      if(r?.success){ITEMS=[r.data];goP('inv');document.getElementById('invbd').innerHTML=ITEMS.map(item=>{const wc=WHS.map(wh=>`<td>${(item.warehouse_stocks||[]).find(ws=>ws.warehouse_id===wh.id)?.quantity??0}</td>`).join('');return`<tr><td class="tn">${item.code}</td><td class="tb2">${item.name}</td><td>${item.category_name}</td>${wc}<td style="font-weight:700">${item.total_stock}</td><td>${item.unit}</td><td>${item.min_quantity}</td><td>${item.status}</td><td><button class="btn bxs bo" onclick="showItmDt(${item.id})">📋</button></td></tr>`;}).join('');document.getElementById('invcnt').textContent=`تم العثور على: ${item.name}`;}else toast(r?.error||'لم يتم العثور','e');
     },
     function(){}
   ).catch(function(err){
@@ -3173,13 +3196,19 @@ function addSRow(item){
   const div=document.getElementById('sis');
   const ri=div.children.length;
   const opts=ITEMS.map(i=>`<option value="${i.id}" data-code="${i.code}" data-unit="${i.unit||''}" ${item&&item.item_id===i.id?'selected':''}>${i.code} — ${i.name}</option>`).join('');
-  const row=document.createElement('div');row.className='sg s4 sr';row.style.marginBottom='6px';row.innerHTML=
-    `<select style="min-width:140px" onchange="calcSTot()"><option value="">— اختر صنف —</option>${opts}</select>
-     <input type="number" placeholder="الكمية" value="${item?item.quantity:1}" min="0.01" step="0.01" style="width:80px" oninput="calcSTot()">
-     <input type="number" placeholder="السعر" value="${item?item.unit_price:0}" min="0" step="0.01" style="width:90px" oninput="calcSTot()">
-     <button class="bico" onclick="this.parentElement.remove();calcSTot()">🗑️</button>`;
+  const row=document.createElement('div');row.style.display='flex';row.style.gap='6px';row.style.alignItems='center';row.style.marginBottom='6px';row.innerHTML=
+    `<select style="flex:2;min-width:100px" onchange="calcSTot()"><option value="">— اختر صنف —</option>${opts}</select>
+     <input type="number" placeholder="الكمية" value="${item?item.quantity:1}" min="0.01" step="0.01" style="flex:0 0 70px" oninput="calcSTot()">
+     <input type="number" placeholder="السعر" value="${item?item.unit_price:0}" min="0" step="0.01" style="flex:0 0 80px" oninput="calcSTot()">
+     <button class="btn bo bxs" style="flex:0 0 34px" onclick="salBC(event)" title="مسح باركود">📸</button>
+     <button class="bico" style="flex:0 0 30px" onclick="this.parentElement.remove();calcSTot()">🗑️</button>`;
   div.appendChild(row);
   if(!item) calcSTot();
+}
+function salBC(e){
+  const sel=e.target.closest('.sr').children[0];
+  if(!sel.id) sel.id='salbc_'+(Date.now());
+  openBC(sel.id);
 }
 function calcSTot(){
   const rows=document.querySelectorAll('#sis .sr');let sub=0;
