@@ -22,7 +22,7 @@ from app.models import (
     RFQ, RFQSupplier, Quotation, QuotationItem,
     PurchaseOrder, POItem,
     GoodsReceipt, GRNItem,
-    PurchaseReturn, PReturnItem,
+    PurchaseReturn, PReturnItem, SaleOrder, SaleItem,
     SupplierEvaluation, SupplierProfile, InventoryLayer,
     Lot, UnitConversion, ApprovalChain, ApprovalStep, ScheduledCount,
 )
@@ -2327,6 +2327,9 @@ def get_notif_settings():
     return ok({
         "whatsapp_enabled": d.get("whatsapp_enabled","false"),
         "whatsapp_number": d.get("whatsapp_number",""),
+        "whatsapp_cloud_api": d.get("whatsapp_cloud_api","false"),
+        "whatsapp_token": d.get("whatsapp_token",""),
+        "whatsapp_phone_id": d.get("whatsapp_phone_id",""),
         "email_enabled": d.get("email_enabled","false"),
         "smtp_host": d.get("smtp_host",""),
         "smtp_port": d.get("smtp_port","587"),
@@ -2341,8 +2344,8 @@ def get_notif_settings():
 @require_role("admin","manager")
 def save_notif_settings():
     data = request.get_json() or {}
-    for key in ["whatsapp_enabled","whatsapp_number","email_enabled",
-                "smtp_host","smtp_port","smtp_user","smtp_pass",
+    for key in ["whatsapp_enabled","whatsapp_number","whatsapp_cloud_api","whatsapp_token","whatsapp_phone_id",
+                "email_enabled","smtp_host","smtp_port","smtp_user","smtp_pass",
                 "email_from","notify_low_stock","notify_transfer"]:
         if key in data:
             c = NotificationConfig.query.filter_by(key=key).first()
@@ -2389,8 +2392,11 @@ def test_whatsapp():
     if not number: return err("رقم الواتساب مطلوب")
     number = number.strip().replace(" ","").replace("-","")
     if not number.startswith("+"): number = "+" + number
-    url = f"https://wa.me/{number}?text={urllib.parse.quote('🧪 هذا اختبار إشعار من نظام إدارة المخازن ✅')}"
-    return ok({"url":url}, message="✅ رابط واتساب جاهز")
+    from app.services.whatsapp import WhatsAppService
+    ok, result = WhatsAppService.send_notification(number, "🔔 اختبار إشعار", "هذه رسالة اختبارية من نظام النبلاء")
+    if result.get("method") == "cloud_api":
+        return ok(result, message="✅ تم إرسال رسالة واتساب عبر Cloud API")
+    return ok(result, message="✅ رابط واتساب جاهز (الوضع التجريبي)")
 
 # ══════════════════════════════════════════════════════════════
 #  BACKUP
@@ -3282,6 +3288,206 @@ def po_report():
 def supplier_report():
     profiles = SupplierProfile.query.order_by(SupplierProfile.total_evaluations.desc()).all()
     return ok([p.to_dict() for p in profiles])
+
+# ══════════════════════════════════════════════════════════════
+#  SALES — Sale Orders
+# ══════════════════════════════════════════════════════════════
+@api.route("/sales", methods=["GET"])
+@jwt_required()
+def get_sales():
+    search = request.args.get("search","")
+    status = request.args.get("status","")
+    q = SaleOrder.query
+    if search: q = q.filter(SaleOrder.ref_number.contains(search) | SaleOrder.customer_name.contains(search))
+    if status: q = q.filter(SaleOrder.status == status)
+    return ok([s.to_dict() for s in q.order_by(SaleOrder.created_at.desc()).all()])
+
+@api.route("/sales", methods=["POST"])
+@require_role("admin","manager","keeper")
+def create_sale():
+    data = request.get_json() or {}
+    if not data.get("customer_name"): return err("اسم العميل مطلوب")
+    if not data.get("items"): return err("يجب إضافة أصناف على الأقل")
+    ref = gen_ref("SO")
+    sale = SaleOrder(ref_number=ref, customer_name=data["customer_name"],
+        customer_phone=data.get("customer_phone",""),
+        customer_email=data.get("customer_email",""),
+        warehouse_id=data.get("warehouse_id"),
+        discount_pct=float(data.get("discount_pct",0)),
+        tax_pct=float(data.get("tax_pct",0)),
+        notes=data.get("notes",""), status="pending",
+        created_by=g.current_user.id)
+    if "sale_date" in data: sale.sale_date = parse_date(data["sale_date"])
+    db.session.add(sale); db.session.flush()
+    subtotal = 0
+    for it in (data.get("items") or []):
+        qty = float(it.get("quantity",0)); up = float(it.get("unit_price",0))
+        total = round(qty * up, 2)
+        item_id = it.get("item_id")
+        if not item_id:
+            item = Item.query.filter_by(name=it.get("item_name","")).first()
+            if item: item_id = item.id
+        db.session.add(SaleItem(sale_id=sale.id, item_id=item_id,
+            item_name=it.get("item_name",""), quantity=qty,
+            unit_price=up, total=total))
+        subtotal += total
+    discount_amt = round(subtotal * sale.discount_pct / 100, 2) if sale.discount_pct else 0
+    tax_amt = round((subtotal - discount_amt) * sale.tax_pct / 100, 2) if sale.tax_pct else 0
+    sale.subtotal = subtotal; sale.discount_amt = discount_amt
+    sale.tax_amt = tax_amt; sale.total = round(subtotal - discount_amt + tax_amt, 2)
+    AuditService.log("create","sale_order",sale.id,f"إنشاء أمر بيع: {ref}")
+    db.session.commit()
+    return created(sale.to_dict())
+
+@api.route("/sales/<int:sid>", methods=["GET"])
+@jwt_required()
+def get_sale(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    return ok(sale.to_dict())
+
+@api.route("/sales/<int:sid>", methods=["PUT"])
+@require_role("admin","manager")
+def update_sale(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    if sale.status not in ("pending",): return err("يمكن تعديل الطلبات المعلقة فقط")
+    data = request.get_json() or {}
+    for f in ("customer_name","customer_phone","customer_email","notes"):
+        if f in data: setattr(sale, f, data[f])
+    if "discount_pct" in data: sale.discount_pct = float(data["discount_pct"])
+    if "tax_pct" in data: sale.tax_pct = float(data["tax_pct"])
+    if "warehouse_id" in data: sale.warehouse_id = int(data["warehouse_id"])
+    if "items" in data:
+        SaleItem.query.filter_by(sale_id=sid).delete(); db.session.flush()
+        subtotal = 0
+        for it in data["items"]:
+            qty = float(it.get("quantity",0)); up = float(it.get("unit_price",0))
+            tot = round(qty * up, 2)
+            item_id = it.get("item_id")
+            if not item_id:
+                item = Item.query.filter_by(name=it.get("item_name","")).first()
+                if item: item_id = item.id
+            db.session.add(SaleItem(sale_id=sid, item_id=item_id,
+                item_name=it.get("item_name",""), quantity=qty,
+                unit_price=up, total=tot))
+            subtotal += tot
+        discount_amt = round(subtotal * sale.discount_pct / 100, 2) if sale.discount_pct else 0
+        tax_amt = round((subtotal - discount_amt) * sale.tax_pct / 100, 2) if sale.tax_pct else 0
+        sale.subtotal = subtotal; sale.discount_amt = discount_amt
+        sale.tax_amt = tax_amt; sale.total = round(subtotal - discount_amt + tax_amt, 2)
+    AuditService.log("edit","sale_order",sid,f"تعديل أمر بيع: {sale.ref_number}")
+    db.session.commit()
+    return ok(sale.to_dict())
+
+@api.route("/sales/<int:sid>/confirm", methods=["POST"])
+@require_role("admin","manager")
+def confirm_sale(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    if sale.status != "pending": return err("يمكن تأكيد الطلبات المعلقة فقط")
+    if not sale.warehouse_id: return err("يجب تحديد المخزن")
+    # deduct stock for each item
+    for si in sale.items:
+        if not si.item_id: continue
+        stk = Stock.query.filter_by(item_id=si.item_id, warehouse_id=sale.warehouse_id).first()
+        if not stk or stk.quantity < si.quantity:
+            return err(f"الكمية غير كافية للصنف: {si.item_name} (المتاح: {stk.quantity if stk else 0})")
+    for si in sale.items:
+        if not si.item_id: continue
+        stk = Stock.query.filter_by(item_id=si.item_id, warehouse_id=sale.warehouse_id).first()
+        if stk: stk.quantity = max(0, stk.quantity - si.quantity)
+        m = StockMovement(ref_number=gen_ref("SO"), type="out", item_id=si.item_id,
+            warehouse_id=sale.warehouse_id, quantity=si.quantity,
+            unit_price=si.unit_price, user_id=g.current_user.id,
+            notes=f"أمر بيع: {sale.ref_number}")
+        db.session.add(m)
+    sale.status = "confirmed"
+    AuditService.log("confirm","sale_order",sid,f"تأكيد أمر بيع: {sale.ref_number}")
+    db.session.commit()
+    return ok(sale.to_dict())
+
+@api.route("/sales/<int:sid>/invoice", methods=["GET"])
+@jwt_required()
+def sale_invoice(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+    except ImportError:
+        return err("reportlab غير مثبت")
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    ts = ParagraphStyle("T", parent=styles["Title"], fontSize=16, alignment=TA_CENTER)
+    company = "شركة النبلاء للمقاولات العامة والإنشاءات"
+    elems = [Paragraph(f"<b>{company}</b>", ts),
+             Paragraph(f"فاتورة بيع — {sale.ref_number}", styles["Normal"]),
+             Spacer(1, 0.3*cm)]
+    info = [
+        ["رقم الفاتورة:", sale.ref_number],
+        ["التاريخ:", sale.sale_date.isoformat() if sale.sale_date else ""],
+        ["العميل:", sale.customer_name],
+        ["الهاتف:", sale.customer_phone or "—"],
+        ["المخزن:", sale.warehouse.name if sale.warehouse else "—"],
+        ["الحالة:", sale.STATUS_LABELS.get(sale.status, sale.status)],
+    ]
+    t = Table(info, colWidths=[4*cm, 10*cm])
+    t.setStyle(TableStyle([
+        ("FONTSIZE",(0,0),(-1,-1),10),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#BDC3C7")),
+        ("BACKGROUND",(0,0),(0,-1),colors.HexColor("#1B4F72")),
+        ("TEXTCOLOR",(0,0),(0,-1),colors.white),
+    ]))
+    elems.append(t); elems.append(Spacer(1,0.3*cm))
+    hdr = ["الصنف","الكمية","سعر الوحدة","الإجمالي"]
+    rows = [[si.item_name, str(si.quantity), f"{si.unit_price:,.2f}", f"{si.total:,.2f}"] for si in sale.items]
+    rows.append(["","","الإجمالي:", f"{sale.subtotal:,.2f}"])
+    if sale.discount_amt:
+        rows.append(["","","الخصم:", f"-{sale.discount_amt:,.2f}"])
+    if sale.tax_amt:
+        rows.append(["","","الضريبة:", f"{sale.tax_amt:,.2f}"])
+    rows.append(["","","<b>المجموع النهائي:</b>", f"<b>{sale.total:,.2f}</b>"])
+    tt = Table([hdr]+rows, colWidths=[6*cm,3*cm,4*cm,4*cm], repeatRows=1)
+    tt.setStyle(TableStyle([
+        ("FONTSIZE",(0,0),(-1,-1),9),("ALIGN",(1,0),(-1,-1),"CENTER"),
+        ("GRID",(0,0),(-1,-2),0.3,colors.HexColor("#BDC3C7")),
+        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1B4F72")),
+        ("TEXTCOLOR",(0,0),(-1,0),colors.white),
+        ("LINEBELOW",(0,-1),(-1,-1),1,colors.HexColor("#1B4F72")),
+    ]))
+    elems.append(tt)
+    doc.build(elems); buf.seek(0)
+    return send_file(buf, mimetype="application/pdf",
+                     download_name=f"sale_{sale.ref_number}.pdf", as_attachment=True)
+
+@api.route("/sales/<int:sid>/cancel", methods=["POST"])
+@require_role("admin","manager")
+def cancel_sale(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    if sale.status in ("cancelled",): return err("الطلب ملغي بالفعل")
+    # reverse stock if confirmed
+    if sale.status == "confirmed" and sale.warehouse_id:
+        for si in sale.items:
+            if not si.item_id: continue
+            stk = Stock.query.filter_by(item_id=si.item_id, warehouse_id=sale.warehouse_id).first()
+            if stk: stk.quantity += si.quantity
+    sale.status = "cancelled"
+    AuditService.log("cancel","sale_order",sid,f"إلغاء أمر بيع: {sale.ref_number}")
+    db.session.commit()
+    return ok(sale.to_dict())
+
+@api.route("/sales/<int:sid>", methods=["DELETE"])
+@require_role("admin")
+def delete_sale(sid):
+    sale = SaleOrder.query.get_or_404(sid)
+    if sale.status == "confirmed": return err("لا يمكن حذف أمر مؤكد")
+    db.session.delete(sale)
+    AuditService.log("delete","sale_order",sid,f"حذف أمر بيع")
+    db.session.commit()
+    return ok(message="تم الحذف")
 
 # ══════════════════════════════════════════════════════════════
 #  SUPPLIER PORTAL

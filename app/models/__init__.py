@@ -803,6 +803,65 @@ class GRNItem(db.Model):
                 "accepted_qty":self.accepted_qty or 0,
                 "unit_price":self.unit_price,"total":self.total or 0}
 
+class SaleOrder(db.Model):
+    __tablename__ = "sale_orders"
+    id            = db.Column(db.Integer, primary_key=True)
+    ref_number    = db.Column(db.String(60), unique=True)
+    customer_name = db.Column(db.String(200), nullable=False)
+    customer_phone= db.Column(db.String(30))
+    customer_email= db.Column(db.String(160))
+    sale_date     = db.Column(db.Date, default=datetime.datetime.utcnow)
+    warehouse_id  = db.Column(db.Integer, db.ForeignKey("warehouses.id"))
+    subtotal      = db.Column(db.Float, default=0.0)
+    discount_pct  = db.Column(db.Float, default=0.0)
+    discount_amt  = db.Column(db.Float, default=0.0)
+    tax_pct       = db.Column(db.Float, default=0.0)
+    tax_amt       = db.Column(db.Float, default=0.0)
+    total         = db.Column(db.Float, default=0.0)
+    notes         = db.Column(db.Text)
+    status        = db.Column(db.String(20), default="pending", index=True)
+    created_by    = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at    = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    warehouse = db.relationship("Warehouse")
+    creator   = db.relationship("User")
+    items     = db.relationship("SaleItem", back_populates="sale", cascade="all,delete-orphan")
+    STATUS_LABELS = {"pending":"معلق","confirmed":"مؤكد","invoiced":"تم الفوترة","cancelled":"ملغي"}
+    def to_dict(self):
+        i_total = sum(i.total for i in self.items)
+        return {"id":self.id,"ref_number":self.ref_number,
+                "customer_name":self.customer_name,"customer_phone":self.customer_phone or "",
+                "customer_email":self.customer_email or "",
+                "sale_date":self.sale_date.isoformat() if self.sale_date else "",
+                "warehouse_id":self.warehouse_id,
+                "warehouse_name":self.warehouse.name if self.warehouse else "",
+                "subtotal":self.subtotal or i_total,
+                "discount_pct":self.discount_pct,"discount_amt":self.discount_amt or 0,
+                "tax_pct":self.tax_pct,"tax_amt":self.tax_amt or 0,
+                "total":self.total or 0,"notes":self.notes or "","status":self.status,
+                "status_label":self.STATUS_LABELS.get(self.status,self.status),
+                "creator_name":self.creator.name if self.creator else "",
+                "items":[i.to_dict() for i in self.items],
+                "created_at":self.created_at.isoformat()}
+
+class SaleItem(db.Model):
+    __tablename__ = "sale_items"
+    id         = db.Column(db.Integer, primary_key=True)
+    sale_id    = db.Column(db.Integer, db.ForeignKey("sale_orders.id"))
+    item_id    = db.Column(db.Integer, db.ForeignKey("items.id"), nullable=True)
+    item_name  = db.Column(db.String(200))
+    quantity   = db.Column(db.Float)
+    unit_price = db.Column(db.Float)
+    total      = db.Column(db.Float)
+    sale = db.relationship("SaleOrder", back_populates="items")
+    item = db.relationship("Item")
+    def to_dict(self):
+        return {"id":self.id,"sale_id":self.sale_id,
+                "item_id":self.item_id,"item_name":self.item_name or "",
+                "item_code":self.item.code if self.item else "",
+                "item_unit":self.item.unit if self.item else "",
+                "quantity":self.quantity,"unit_price":self.unit_price,
+                "total":self.total or 0}
+
 class PurchaseReturn(db.Model):
     __tablename__ = "purchase_returns"
     id          = db.Column(db.Integer, primary_key=True)

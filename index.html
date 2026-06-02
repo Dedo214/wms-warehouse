@@ -258,6 +258,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     <div class="ni" data-p="peval"><span class="ni-i">⭐</span><span class="nt" data-i18n="peval">تقييم الموردين</span></div>
     <div class="ni" data-p="prep"><span class="ni-i">📑</span><span class="nt" data-i18n="prep">تقارير المشتريات</span></div>
   </div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المبيعات</span></div><div class="ns">
+    <div class="ni" data-p="sales"><span class="ni-i">💰</span><span class="nt" data-i18n="sales">المبيعات</span></div>
+    <div class="ni" data-p="sord"><span class="ni-i">📋</span><span class="nt" data-i18n="sord">أوامر البيع</span></div>
+    <div class="ni" data-p="sinv"><span class="ni-i">🧾</span><span class="nt" data-i18n="sinv">فواتير البيع</span></div>
+  </div></div>
   <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">تقارير وتحليلات</span></div><div class="ns">
     <div class="ni" data-p="rep"><span class="ni-i">📊</span><span class="nt" data-i18n="rep">التقارير</span></div>
     <div class="ni" data-p="audit"><span class="ni-i">📋</span><span class="nt" data-i18n="audit">سجل العمليات</span></div>
@@ -278,6 +283,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     <div class="ni" data-p="pret"><span class="ni-i">🔙</span><span class="nt">مرتجعات</span></div>
     <div class="ni" data-p="peval"><span class="ni-i">⭐</span><span class="nt">تقييم الموردين</span></div>
     <div class="ni" data-p="prep"><span class="ni-i">📋</span><span class="nt">تقارير المشتريات</span></div>
+  </div></div>
+  <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">المبيعات</span></div><div class="ns">
+    <div class="ni" data-p="sales"><span class="ni-i">💰</span><span class="nt">المبيعات</span></div>
+    <div class="ni" data-p="sord"><span class="ni-i">📋</span><span class="nt">أوامر البيع</span></div>
+    <div class="ni" data-p="sinv"><span class="ni-i">🧾</span><span class="nt">فواتير البيع</span></div>
   </div></div>
   <div class="ng"><div class="nh exp" onclick="toggleNS(this)"><span class="na">▶</span><span class="nlt">الإدارة</span></div><div class="ns">
     <div class="ni" data-p="sup"><span class="ni-i">🏭</span><span class="nt">الموردون</span></div>
@@ -808,7 +818,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     </div>
   </div>
 
-  </div><!-- /content -->
+  <!-- SALES -->
+  <div class="page" id="page-sales">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="sw2"><input type="text" id="sales" placeholder="بحث..." style="width:200px" oninput="loadSales()"><span class="swi">🔍</span></div>
+        <select id="salesSt" style="width:auto" onchange="loadSales()">
+          <option value="">الحالة</option>
+          <option value="pending">معلق</option>
+          <option value="confirmed">مؤكد</option>
+          <option value="invoiced">تم الفوترة</option>
+          <option value="cancelled">ملغي</option>
+        </select>
+      </div>
+      <button class="btn bp" onclick="openM('salem')">+ أمر بيع جديد</button>
+    </div>
+    <div id="skpis" class="sg s3" style="margin-bottom:12px"></div>
+    <div class="tw tscr"><table><thead><tr><th>رقم الأمر</th><th>العميل</th><th>التاريخ</th><th>المخزن</th><th>الإجمالي</th><th>الحالة</th><th>المنشئ</th><th></th></tr></thead><tbody id="sbd"></tbody></table></div>
+    <div id="spg" class="pgb" style="margin-top:8px"></div>
+    <div id="sds" style="margin-top:14px;display:none">
+      <div class="card"><div class="ch"><div class="ct" id="sdtl">📄 تفاصيل الأمر</div></div>
+        <div id="sd" style="font-size:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- END /content -->
 </div><!-- /main -->
 </div><!-- /app -->
 
@@ -1236,6 +1271,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
   <div class="mf"><button class="btn bo" onclick="closeM('evadd')">إلغاء</button><button class="btn bp" onclick="subEval()">💾 حفظ التقييم</button></div>
 </div></div>
 
+<!-- SALE ORDER MODAL -->
+<div class="ov" id="ov-salem"><div class="modal" style="max-width:650px">
+  <div class="mh"><div><div class="mt2">📋 أمر بيع</div></div><button class="mc" onclick="closeM('salem')">×</button></div>
+  <div class="mb" style="max-height:70vh;overflow-y:auto">
+    <div class="sg s2">
+      <div class="fg"><label class="fl">اسم العميل *</label><input type="text" id="scn" oninput="clErr('scn')"><span class="ferr" id="esc"></span></div>
+      <div class="fg"><label class="fl">هاتف العميل</label><input type="text" id="scp"></div>
+    </div>
+    <div class="sg s2">
+      <div class="fg"><label class="fl">البريد الإلكتروني</label><input type="email" id="sce"></div>
+      <div class="fg"><label class="fl">التاريخ</label><input type="date" id="ssd"></div>
+    </div>
+    <div class="sg s2">
+      <div class="fg"><label class="fl">المخزن *</label><select id="swh"><option value="">اختر المخزن</option></select></div>
+      <div class="fg"><label class="fl">الخصم %</label><input type="number" id="sdp" value="0" min="0" max="100" step="0.1" oninput="calcSTot()"></div>
+    </div>
+    <div class="fg"><label class="fl">الضريبة %</label><input type="number" id="stp" value="0" min="0" max="100" step="0.1" oninput="calcSTot()"></div>
+    <div id="sis" style="margin-top:12px"></div>
+    <button class="btn bo bsm" onclick="addSRow()">+ إضافة صنف</button>
+    <div style="margin-top:8px;text-align:left;font-size:16px;font-weight:bold">
+      <span>الإجمالي: </span><span id="sgt">0</span>
+    </div>
+    <div class="fg"><label class="fl">ملاحظات</label><textarea id="snt" rows="2"></textarea></div>
+    <div class="alert al-d" id="serr" style="display:none"></div>
+  </div>
+  <div class="mf"><button class="btn bo" onclick="closeM('salem')">إلغاء</button><button class="btn bp" onclick="subSale()">💾 حفظ</button></div>
+</div></div>
+
 <div class="tc" id="tc"></div>
 
 <script>
@@ -1364,6 +1427,7 @@ const L10N={
     sup:'الموردون',proj:'المشاريع',usrs:'المستخدمون',rep:'التقارير',audit:'سجل العمليات',cfg:'الإعدادات',
     purch:'لوحة المشتريات',prrq:'طلبات الشراء',rfqs:'طلب عروض أسعار',quotas:'عروض الأسعار',pord:'أوامر الشراء',
     grns:'إستلام البضائع',pret:'مرتجعات',peval:'تقييم الموردين',prep:'تقارير المشتريات',
+    sales:'المبيعات',sord:'أوامر البيع',sinv:'فواتير البيع',
     lang:'اللغة',dark:'الوضع الليلي',save:'حفظ الإعدادات',search:'بحث سريع...',
     notifs:'التنبيهات',export_excel:'Excel',export_csv:'CSV',export_pdf:'PDF',
     add_movement:'+ حركة',add:'إضافة',edit:'تعديل',delete:'حذف',cancel:'إلغاء',close:'إغلاق',
@@ -1374,6 +1438,7 @@ const L10N={
     sup:'Suppliers',proj:'Projects',usrs:'Users',rep:'Reports',audit:'Audit Log',cfg:'Settings',
     purch:'Purchasing',prrq:'PR',rfqs:'RFQ',quotas:'Quotations',pord:'PO',
     grns:'GRN',pret:'Returns',peval:'Supplier Eval',prep:'Purchasing Reports',
+    sales:'Sales',sord:'Sale Orders',sinv:'Sale Invoices',
     lang:'Language',dark:'Dark Mode',save:'Save Settings',search:'Quick search...',
     notifs:'Notifications',export_excel:'Excel',export_csv:'CSV',export_pdf:'PDF',
     add_movement:'+ Movement',add:'Add',edit:'Edit',delete:'Delete',cancel:'Cancel',close:'Close',
@@ -1421,7 +1486,7 @@ function fsel(id,opts,prefix=''){const el=document.getElementById(id);if(!el)ret
 // ══════════════════════════════════════════════
 //  NAVIGATION
 // ══════════════════════════════════════════════
-const PT={dash:'لوحة التحكم',inv:'الأصناف',movs:'الوارد والصرف',trans:'التحويلات',cnt:'الجرد',stkq:'حالة المخزون',sup:'الموردون',proj:'المشاريع',usrs:'المستخدمون',rep:'التقارير',audit:'سجل العمليات',cfg:'الإعدادات',purch:'لوحة المشتريات',prrq:'طلبات الشراء',rfqs:'طلب عروض أسعار',quotas:'عروض الأسعار',pord:'أوامر الشراء',grns:'إستلام البضائع',pret:'مرتجعات',peval:'تقييم الموردين',prep:'تقارير المشتريات',suplogin:'تسجيل دخول الموردين',supdashboard:'لوحة المورد',suprfqs:'عروض الأسعار',suporders:'أوامر الشراء'};
+const PT={dash:'لوحة التحكم',inv:'الأصناف',movs:'الوارد والصرف',trans:'التحويلات',cnt:'الجرد',stkq:'حالة المخزون',sup:'الموردون',proj:'المشاريع',usrs:'المستخدمون',rep:'التقارير',audit:'سجل العمليات',cfg:'الإعدادات',purch:'لوحة المشتريات',prrq:'طلبات الشراء',rfqs:'طلب عروض أسعار',quotas:'عروض الأسعار',pord:'أوامر الشراء',grns:'إستلام البضائع',pret:'مرتجعات',peval:'تقييم الموردين',prep:'تقارير المشتريات',sales:'المبيعات',sord:'أوامر البيع',sinv:'فواتير البيع',suplogin:'تسجيل دخول الموردين',supdashboard:'لوحة المورد',suprfqs:'عروض الأسعار',suporders:'أوامر الشراء'};
 // use t(key) for translated labels
 function goP(p){
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
@@ -1429,7 +1494,7 @@ function goP(p){
   document.getElementById('page-'+p)?.classList.add('on');
   document.querySelector(`.ni[data-p="${p}"]`)?.classList.add('on');
   document.getElementById('pgtl').textContent=t(p)||PT[p]||p;
-  const fns={dash:loadDash,inv:loadInv,movs:loadMovs,trans:()=>loadTrans(''),cnt:loadCnt,stkq:loadStkInq,sup:loadSup,proj:loadProj,usrs:loadUsrs,audit:()=>loadAudit(1),  cfg:()=>{loadDbStats();loadSettings();loadWhMgmt();loadCatMgmt();loadProjMgmt();loadBkCfg();},rep:()=>{if(!document.getElementById('repdf')?.value||!document.getElementById('repdt')?.value)setRepPeriod(30);currentRepId='bal';REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r==='bal'?'block':'none';});document.getElementById('repdatebar').style.display='none';loadBalRep();loadRepKpis();},purch:loadPurDash,prrq:()=>loadPRs(),rfqs:()=>loadRFQs(),quotas:()=>loadQts(),pord:()=>loadPOs(),grns:()=>loadGRNs(),pret:()=>loadReturns(),peval:()=>loadEvals(),prep:()=>{if(!document.getElementById('prepdf')?.value||!document.getElementById('prepdt')?.value)setPP('p',30);loadPurRep();}};
+  const fns={dash:loadDash,inv:loadInv,movs:loadMovs,trans:()=>loadTrans(''),cnt:loadCnt,stkq:loadStkInq,sup:loadSup,proj:loadProj,usrs:loadUsrs,audit:()=>loadAudit(1),  cfg:()=>{loadDbStats();loadSettings();loadWhMgmt();loadCatMgmt();loadProjMgmt();loadBkCfg();},rep:()=>{if(!document.getElementById('repdf')?.value||!document.getElementById('repdt')?.value)setRepPeriod(30);currentRepId='bal';REPS.forEach(r=>{const e=document.getElementById('rep-'+r);if(e)e.style.display=r==='bal'?'block':'none';});document.getElementById('repdatebar').style.display='none';loadBalRep();loadRepKpis();},purch:loadPurDash,prrq:()=>loadPRs(),rfqs:()=>loadRFQs(),quotas:()=>loadQts(),pord:()=>loadPOs(),grns:()=>loadGRNs(),pret:()=>loadReturns(),peval:()=>loadEvals(),prep:()=>{if(!document.getElementById('prepdf')?.value||!document.getElementById('prepdt')?.value)setPP('p',30);loadPurRep();},sales:()=>loadSales(),sord:()=>loadSales(),sinv:()=>loadSales()};
   if(fns[p]) fns[p]();
   // expand parent section if collapsed
   const nav=document.querySelector(`.ni[data-p="${p}"]`);
@@ -3011,8 +3076,136 @@ async function popWh(el){if(!el)return;const r=await $api('GET','/api/warehouses
 async function popPRs(el){if(!el)return;const r=await $api('GET','/api/procurement/pr?status=approved&per_page=999');if(!r?.success)return;const items=r.data?.prs||r.data||[];el.innerHTML='<option value="">بدون</option>'+items.map(p=>`<option value="${p.id}" data-sup="${p.supplier_id||''}">${p.ref_number}</option>`).join('');}
 async function popPOsGRN(el){if(!el)return;const r=await $api('GET','/api/procurement/po?status=sent&per_page=999');if(!r?.success)return;const items=r.data?.pos||r.data||[];const r2=await $api('GET','/api/procurement/po?status=partial&per_page=999');const items2=r2?.data?.pos||r2?.data||[];const all=[...items,...items2];el.innerHTML='<option value="">اختر أمر الشراء</option>'+all.map(p=>`<option value="${p.id}">${p.ref_number} - ${p.supplier_name||''}</option>`).join('');}
 
+// ══════════════════════════════════════════════
+//  SALES
+// ══════════════════════════════════════════════
+let salesData=[],sEditId=null;
+async function loadSales(){
+  const s=document.getElementById('sales')?.value||'';
+  const st=document.getElementById('salesSt')?.value||'';
+  const r=await $api('GET',`/api/sales?search=${encodeURIComponent(s)}&status=${st}`);if(!r?.success)return;
+  salesData=r.data||[];
+  // KPIs
+  const total=salesData.reduce((a,b)=>a+(b.total||0),0);
+  const confirmed=salesData.filter(x=>x.status==='confirmed').length;
+  const pending=salesData.filter(x=>x.status==='pending').length;
+  document.getElementById('skpis').innerHTML=
+    `<div class="card"><div class="ch"><div class="ct">💰 إجمالي المبيعات</div></div><div style="padding:10px 14px;font-size:22px;font-weight:bold">${curSym()}${fmtN(total)}</div></div>
+     <div class="card"><div class="ch"><div class="ct">⏳ معلقة</div></div><div style="padding:10px 14px;font-size:22px;font-weight:bold;color:var(--war)">${pending}</div></div>
+     <div class="card"><div class="ch"><div class="ct">✅ مؤكدة</div></div><div style="padding:10px 14px;font-size:22px;font-weight:bold;color:var(--suc)">${confirmed}</div></div>`;
+  document.getElementById('sbd').innerHTML=salesData.map(s=>
+    `<tr>
+      <td><b>${s.ref_number}</b></td>
+      <td>${s.customer_name}</td>
+      <td>${s.sale_date||''}</td>
+      <td>${s.warehouse_name||'—'}</td>
+      <td>${curSym()}${fmtN(s.total)}</td>
+      <td><span class="bdg b-${s.status==='confirmed'?'s':s.status==='pending'?'w':s.status==='cancelled'?'d':'i'}">${s.status_label}</span></td>
+      <td>${s.creator_name||''}</td>
+      <td><div class="ac">
+        <button class="ab" onclick="showSale(${s.id})" title="عرض">👁️</button>
+        ${s.status==='pending'?`<button class="ab" onclick="sEditId=${s.id};editSale(${s.id})" title="تعديل">✏️</button>`:''}
+        ${s.status==='pending'?`<button class="ab" onclick="confirmSale(${s.id})" title="تأكيد">✅</button>`:''}
+        ${s.status==='confirmed'?`<button class="ab" onclick="saleInvoice(${s.id})" title="فاتورة">🧾</button>`:''}
+        ${s.status!=='cancelled'?`<button class="ab" onclick="cancelSale(${s.id})" title="إلغاء">❌</button>`:''}
+        ${s.status==='pending'?`<button class="ab" onclick="delSale(${s.id})" title="حذف">🗑️</button>`:''}
+      </div></td>
+    </tr>`).join('');
+}
+async function showSale(id){
+  const r=await $api('GET',`/api/sales/${id}`);if(!r?.success){toast('فشل تحميل التفاصيل','e');return;}
+  const s=r.data;const ds=document.getElementById('sds');ds.style.display='block';
+  document.getElementById('sdtl').textContent=`📄 ${s.ref_number}`;
+  const its=s.items.map(i=>`<tr><td>${i.item_name}</td><td>${i.quantity} ${i.item_unit||''}</td><td>${curSym()}${fmtN(i.unit_price)}</td><td>${curSym()}${fmtN(i.total)}</td></tr>`).join('');
+  document.getElementById('sd').innerHTML=`
+    <div class="sg s3" style="margin-bottom:10px">
+      <div><b>العميل:</b> ${s.customer_name}</div>
+      <div><b>الهاتف:</b> ${s.customer_phone||'—'}</div>
+      <div><b>الحالة:</b> <span class="bdg b-${s.status==='confirmed'?'s':s.status==='pending'?'w':s.status==='cancelled'?'d':'i'}">${s.status_label}</span></div>
+    </div>
+    <div class="sg s3" style="margin-bottom:10px">
+      <div><b>التاريخ:</b> ${s.sale_date}</div>
+      <div><b>المخزن:</b> ${s.warehouse_name||'—'}</div>
+      <div><b>المنشئ:</b> ${s.creator_name||''}</div>
+    </div>
+    <div class="tw tscr"><table><thead><tr><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${its}</tbody></table></div>
+    <div style="margin-top:8px;text-align:left">
+      ${s.discount_amt?`<div>الخصم: -${curSym()}${fmtN(s.discount_amt)}</div>`:''}
+      ${s.tax_amt?`<div>الضريبة: ${curSym()}${fmtN(s.tax_amt)}</div>`:''}
+      <div style="font-weight:bold;font-size:16px">المجموع: ${curSym()}${fmtN(s.total)}</div>
+    </div>
+    ${s.notes?`<div style="margin-top:8px"><b>ملاحظات:</b> ${s.notes}</div>`:''}`;
+}
+function addSRow(item){
+  const div=document.getElementById('sis');
+  const ri=div.children.length;
+  const opts=ITEMS.map(i=>`<option value="${i.id}" data-code="${i.code}" data-unit="${i.unit||''}" ${item&&item.item_id===i.id?'selected':''}>${i.code} — ${i.name}</option>`).join('');
+  const row=document.createElement('div');row.className='sg s4 sr';row.style.marginBottom='6px';row.innerHTML=
+    `<select style="min-width:140px" onchange="calcSTot()"><option value="">— اختر صنف —</option>${opts}</select>
+     <input type="number" placeholder="الكمية" value="${item?item.quantity:1}" min="0.01" step="0.01" style="width:80px" oninput="calcSTot()">
+     <input type="number" placeholder="السعر" value="${item?item.unit_price:0}" min="0" step="0.01" style="width:90px" oninput="calcSTot()">
+     <button class="bico" onclick="this.parentElement.remove();calcSTot()">🗑️</button>`;
+  div.appendChild(row);
+  if(!item) calcSTot();
+}
+function calcSTot(){
+  const rows=document.querySelectorAll('#sis .sr');let sub=0;
+  rows.forEach(r=>{const qty=parseFloat(r.children[1].value)||0;const up=parseFloat(r.children[2].value)||0;sub+=qty*up;});
+  const dp=parseFloat(document.getElementById('sdp').value)||0;
+  const tp=parseFloat(document.getElementById('stp').value)||0;
+  const da=sub*dp/100;const ta=(sub-da)*tp/100;
+  document.getElementById('sgt').textContent=curSym()+' '+fmtN(Math.max(0,sub-da+ta));
+}
+async function subSale(){
+  const cn=document.getElementById('scn').value.trim();if(!cn){shAe('serr','اسم العميل مطلوب');return;}
+  const items=[];let valid=true;
+  document.querySelectorAll('#sis .sr').forEach(r=>{
+    const sel=r.children[0];const qty=parseFloat(r.children[1].value)||0;const up=parseFloat(r.children[2].value)||0;
+    if(!sel.value||!qty||!up){valid=false;return;}
+    items.push({item_id:parseInt(sel.value),item_name:sel.options[sel.selectedIndex].text.split(' — ')[1]||sel.options[sel.selectedIndex].text,quantity:qty,unit_price:up});
+  });
+  if(!valid||!items.length){shAe('serr','يجب إضافة أصناف صالحة');return;}
+  const body={customer_name:cn,customer_phone:document.getElementById('scp').value.trim(),customer_email:document.getElementById('sce').value.trim(),warehouse_id:parseInt(document.getElementById('swh').value||0)||null,discount_pct:parseFloat(document.getElementById('sdp').value)||0,tax_pct:parseFloat(document.getElementById('stp').value)||0,notes:document.getElementById('snt').value.trim(),items,
+    sale_date:document.getElementById('ssd').value||undefined};
+  const method=sEditId?'PUT':'POST';const url=sEditId?`/api/sales/${sEditId}`:'/api/sales';
+  const r=await $api(method,url,body);if(!r?.success){shAe('serr',r?.error||'فشل الحفظ');return;}
+  toast(`✅ ${sEditId?'تم التعديل':'تم إنشاء أمر البيع'}`,'s');closeM('salem');loadSales();sEditId=null;
+}
+async function editSale(id){
+  sEditId=id;openM('salem');
+  const r=await $api('GET',`/api/sales/${id}`);if(!r?.success)return;
+  const s=r.data;
+  document.getElementById('scn').value=s.customer_name||'';
+  document.getElementById('scp').value=s.customer_phone||'';
+  document.getElementById('sce').value=s.customer_email||'';
+  document.getElementById('ssd').value=s.sale_date||'';
+  document.getElementById('swh').value=s.warehouse_id||'';
+  document.getElementById('sdp').value=s.discount_pct||0;
+  document.getElementById('stp').value=s.tax_pct||0;
+  document.getElementById('snt').value=s.notes||'';
+  document.getElementById('sis').innerHTML='';
+  (s.items||[]).forEach(i=>addSRow(i));
+  calcSTot();
+}
+async function confirmSale(id){
+  if(!confirm('تأكيد أمر البيع؟ سيتم خصم الكميات من المخزن'))return;
+  const r=await $api('POST',`/api/sales/${id}/confirm`,{});if(!r?.success){toast(r?.error||'فشل التأكيد','e');return;}
+  toast('✅ تم تأكيد الأمر وخصم المخزون','s');loadSales();
+}
+async function saleInvoice(id){window.open(API+'/api/sales/'+id+'/invoice','_blank');}
+async function cancelSale(id){
+  if(!confirm('إلغاء أمر البيع؟'))return;
+  const r=await $api('POST',`/api/sales/${id}/cancel`,{});if(!r?.success){toast(r?.error||'فشل الإلغاء','e');return;}
+  toast('تم الإلغاء');loadSales();
+}
+async function delSale(id){
+  if(!confirm('حذف أمر البيع؟ لا يمكن التراجع'))return;
+  const r=await $api('DELETE',`/api/sales/${id}`);if(!r?.success){toast(r?.error||'فشل الحذف','e');return;}
+  toast('🗑️ تم الحذف','s');loadSales();
+}
+
 // Populate on modal open
-['pradd','rfqadd','poadd','grnadd','retadd','evadd'].forEach(id=>{
+['pradd','rfqadd','poadd','grnadd','retadd','evadd','salem'].forEach(id=>{
   const el=document.getElementById('ov-'+id);
   if(el)el.addEventListener('click',function(e){if(e.target!==this)return;});
 });
@@ -3025,6 +3218,15 @@ openM=function(id){
   if(id==='grnadd'){popWh(document.getElementById('grnwh'));popPOsGRN(document.getElementById('grnpo'));document.getElementById('grndt').value=new Date().toISOString().slice(0,10);document.getElementById('grnerr').style.display='none';}
   if(id==='retadd'){popSup(document.getElementById('retsup'));popWh(document.getElementById('retwh'));if(!document.getElementById('retitems').children.length)addRetItemRow();}
   if(id==='evadd'){popSup(document.getElementById('evsup'));}
+  if(id==='salem'){
+    sEditId=null;
+    document.getElementById('scn').value='';document.getElementById('scp').value='';document.getElementById('sce').value='';
+    document.getElementById('ssd').value=new Date().toISOString().slice(0,10);
+    document.getElementById('sdp').value='0';document.getElementById('stp').value='0';
+    document.getElementById('snt').value='';document.getElementById('serr').style.display='none';
+    document.getElementById('sis').innerHTML='';
+    popWh(document.getElementById('swh'));addSRow();calcSTot();
+  }
   _origOpenM(id);
 };
 
