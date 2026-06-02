@@ -128,6 +128,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 @keyframes sp{to{transform:rotate(360deg)}}
 .ldg{text-align:center;padding:24px;color:var(--mut)}.sp2{display:block;width:22px;height:22px;border:3px solid var(--bdr);border-top-color:var(--prl);border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 8px}
 .div{height:1px;background:var(--bdr);margin:12px 0}.pgb{display:flex;gap:4px;flex-wrap:wrap}
+@media(max-width:1100px){.sg.s4{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:900px){.s4{grid-template-columns:repeat(2,1fr)}.s3{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:768px){.sb{width:52px}.main{margin-right:52px}.fr2,.fr3{grid-template-columns:1fr}.content{padding:12px 10px}.tb{padding:0 10px}.mlg{max-width:100%;margin:0 4px}.modal{max-width:100%}.tb h1{font-size:13px}.uc{font-size:11px;padding:2px 6px}.uc span:not(.av){display:none}.tw{overflow-x:auto}.tc{bottom:10px;left:10px;right:10px}.toast{min-width:auto;max-width:100%}.ov{padding:6px}.mh{padding:14px 14px 0}.mb{padding:12px 14px}.mf{padding:0 14px 12px}}
 @media(max-width:480px){.s4,.s3,.s2{grid-template-columns:1fr}}
@@ -341,9 +342,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
     <div id="dalerts"></div>
     <div class="sg s4" id="dkpis" style="margin-bottom:14px"><div class="ldg"><span class="sp2"></span>جاري التحميل...</div></div>
     <div class="sg s3" id="dwh" style="margin-bottom:14px"></div>
-    <div class="sg s3" style="margin-bottom:14px">
+    <div class="sg s4" style="margin-bottom:14px">
       <div class="card"><div class="ch"><div class="ct">📈 حركة آخر 7 أيام</div></div><div style="height:200px"><canvas id="cmov"></canvas></div></div>
       <div class="card"><div class="ch"><div class="ct">📊 اتجاه الاستهلاك (6 شهور)</div></div><div style="height:200px"><canvas id="ccons"></canvas></div></div>
+      <div class="card"><div class="ch"><div class="ct">💰 اتجاه المبيعات (6 شهور)</div></div><div style="height:200px"><canvas id="csales"></canvas></div></div>
       <div class="card"><div class="ch"><div class="ct">🔴 أصناف تحتاج توريد</div><button class="btn bg2 bsm" onclick="goP('inv');loadInv('critical')">الكل</button></div><div id="dcrit"></div></div>
     </div>
     <div class="card"><div class="ch"><div class="ct">🕐 آخر الحركات</div><button class="btn bg2 bsm" onclick="goP('movs')">عرض الكل ←</button></div>
@@ -1542,7 +1544,7 @@ async function loadDash(){
   const d=r.data;
   rndrKPIs(d.kpis);rndrWH(d.warehouses);rndrCrit(d.critical_items);
   rndrRec(d.recent_movements);rndrAlerts(d.kpis);rndrChart(d.chart_data);
-  rndrConsChart(d.cons_chart);
+  rndrConsChart(d.cons_chart);rndrSalesChart(d.sales_chart);
   const tb=document.getElementById('tr-nbg');
   tb.textContent=d.kpis.pending_transfers;tb.style.display=d.kpis.pending_transfers>0?'inline':'none';
   document.getElementById('nbd').classList.toggle('on',d.unread_notifications>0);
@@ -1553,7 +1555,9 @@ function rndrKPIs(k){const cs=curSym();document.getElementById('dkpis').innerHTM
   <div class="sc sc-r"><div class="si">⚠️</div><div class="sl">أصناف حرجة</div><div class="sv" style="color:var(--rl)">${k.critical_count}</div><div class="ss">تحت الحد الأدنى</div></div>
   <div class="sc sc-a"><div class="si">🔄</div><div class="sl">تحويلات معلقة</div><div class="sv" style="color:var(--al)">${k.pending_transfers}</div><div class="ss">تنتظر الاعتماد</div></div>
   <div class="sc" style="border-top-color:#8E44AD"><div class="si">🔄</div><div class="sl">معدل الدوران (30 يوم)</div><div class="sv" style="font-size:17px">${k.turnover_rate||0}</div><div class="ss">مرة</div></div>
-  <div class="sc" style="border-top-color:#E67E22"><div class="si">⏳</div><div class="sl">متوسط أيام التخزين</div><div class="sv" style="font-size:17px">${k.avg_storage_days||0}</div><div class="ss">يوم</div></div>`;}
+  <div class="sc" style="border-top-color:#E67E22"><div class="si">⏳</div><div class="sl">متوسط أيام التخزين</div><div class="sv" style="font-size:17px">${k.avg_storage_days||0}</div><div class="ss">يوم</div></div>
+  <div class="sc" style="border-top-color:#2E86C1"><div class="si">🛒</div><div class="sl">مبيعات الشهر</div><div class="sv" style="color:var(--prl)">${fmtN(k.sales_month||0)}</div><div class="ss">${cs} — ${k.sales_count||0} فاتورة</div></div>
+  <div class="sc" style="border-top-color:#1ABC9C"><div class="si">📋</div><div class="sl">معلقة</div><div class="sv" style="color:var(--al)">${k.sales_pending||0}</div><div class="ss">أوامر بيع تنتظر التأكيد</div></div>`;}
 function rndrWH(whs){
   const cl=['var(--pr)','var(--gl)','var(--al)'],pf=['sc-b','sc-g','sc-a'],ic=['🏢','🏬','🏗️'];
   document.getElementById('dwh').innerHTML=whs.map((wh,i)=>{const pct=Math.min(100,Math.round(wh.item_count/(wh.capacity||100)*100));return`<div class="sc ${pf[i]}"><div class="ch"><div><div class="ct">${ic[i]} ${wh.name}</div><div class="cs">${wh.location||''}</div></div><span class="bdg b-s">نشط</span></div><div class="sg s2" style="margin-bottom:10px"><div><div style="font-size:11px;color:var(--mut)">الأصناف</div><div style="font-size:20px;font-weight:800;color:${cl[i]}">${wh.item_count}</div></div><div><div style="font-size:11px;color:var(--mut)">وارد اليوم</div><div style="font-size:20px;font-weight:800;color:var(--gl)">+${wh.today_in}</div></div></div><div class="prog" style="margin-bottom:6px"><div class="pf ${['pb','pg','pa'][i]}" style="width:${pct}%"></div></div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mut)"><span>استيعاب: ${pct}%</span><span>صرف: <strong style="color:var(--rl)">-${wh.today_out}</strong></span></div></div>`;}).join('');}
@@ -1564,6 +1568,7 @@ function rndrRec(movs){document.getElementById('drec').innerHTML=movs.map(m=>`<t
 function rndrAlerts(k){let h='';if(k.critical_count>0) h+=`<div class="alert al-d"><span class="al-ico">🔴</span><div class="al-bd"><div class="al-t">${k.critical_count} أصناف تحت الحد الأدنى</div><a href="#" onclick="goP('inv');loadInv('critical');return false" style="color:var(--r);text-decoration:underline">عرض ←</a></div></div>`;if(k.pending_transfers>0) h+=`<div class="alert al-w"><span class="al-ico">⏳</span><div class="al-bd"><div class="al-t">${k.pending_transfers} تحويلات تنتظر اعتمادك</div><a href="#" onclick="goP('trans');return false" style="color:var(--a);text-decoration:underline">مراجعة ←</a></div></div>`;document.getElementById('dalerts').innerHTML=h;}
 function rndrChart(days){const ctx=document.getElementById('cmov');if(!ctx)return;if(movChart){movChart.destroy();movChart=null;}movChart=new Chart(ctx,{type:'bar',data:{labels:days.map(d=>d.date),datasets:[{label:'وارد',data:days.map(d=>d.in),backgroundColor:'rgba(39,174,96,.75)',borderRadius:4},{label:'صرف',data:days.map(d=>d.out),backgroundColor:'rgba(231,76,60,.65)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(0,0,0,.05)'}}}}});}
 let consChart=null;function rndrConsChart(d){const ctx=document.getElementById('ccons');if(!ctx)return;if(consChart){consChart.destroy();consChart=null;}consChart=new Chart(ctx,{type:'line',data:{labels:d.map(x=>x.month),datasets:[{label:'الاستهلاك (وحدات)',data:d.map(x=>x.value),borderColor:'rgba(231,76,60,.9)',backgroundColor:'rgba(231,76,60,.1)',fill:true,tension:.3,pointRadius:4,pointBackgroundColor:'#E74C3C'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(0,0,0,.05)'},beginAtZero:true}}}});}
+let salesChart=null;function rndrSalesChart(d){const ctx=document.getElementById('csales');if(!ctx)return;if(salesChart){salesChart.destroy();salesChart=null;}salesChart=new Chart(ctx,{type:'line',data:{labels:d.map(x=>x.month),datasets:[{label:'المبيعات (ر.س)',data:d.map(x=>x.value),borderColor:'rgba(46,134,193,.9)',backgroundColor:'rgba(46,134,193,.1)',fill:true,tension:.3,pointRadius:4,pointBackgroundColor:'#2E86C1'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{x:{grid:{display:false}},y:{grid:{color:'rgba(0,0,0,.05)'},beginAtZero:true}}}});}
 
 // ══════════════════════════════════════════════
 //  INVENTORY

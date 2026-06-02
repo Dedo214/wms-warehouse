@@ -3338,6 +3338,8 @@ def create_sale():
     sale.subtotal = subtotal; sale.discount_amt = discount_amt
     sale.tax_amt = tax_amt; sale.total = round(subtotal - discount_amt + tax_amt, 2)
     AuditService.log("create","sale_order",sale.id,f"إنشاء أمر بيع: {ref}")
+    db.session.add(Notification(type="sale_new", title=f"🛒 أمر بيع جديد: {ref}",
+        message=f"العميل: {sale.customer_name} | الإجمالي: {sale.total:,.2f} ر.س"))
     db.session.commit()
     return created(sale.to_dict())
 
@@ -3403,6 +3405,8 @@ def confirm_sale(sid):
         db.session.add(m)
     sale.status = "confirmed"
     AuditService.log("confirm","sale_order",sid,f"تأكيد أمر بيع: {sale.ref_number}")
+    db.session.add(Notification(type="sale_confirmed", title=f"✅ تأكيد أمر بيع: {sale.ref_number}",
+        message=f"تم خصم المخزون للعميل: {sale.customer_name} بقيمة {sale.total:,.2f} ر.س"))
     db.session.commit()
     return ok(sale.to_dict())
 

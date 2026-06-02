@@ -237,7 +237,13 @@ class DashboardService:
         pending_prs = PurchaseRequest.query.filter_by(status="pending").count()
         pending_pos = PurchaseOrder.query.filter_by(status="draft").count()
         sent_pos = PurchaseOrder.query.filter_by(status="sent").count()
+        # ── Sales KPIs ──
+        from app.models import SaleOrder
         month_start = today.replace(day=1)
+        sales_total = db.session.query(func.sum(SaleOrder.total)).filter(SaleOrder.status != "cancelled").scalar() or 0
+        sales_month = db.session.query(func.sum(SaleOrder.total)).filter(SaleOrder.created_at >= month_start, SaleOrder.status != "cancelled").scalar() or 0
+        sales_count = SaleOrder.query.filter(SaleOrder.status != "cancelled").count()
+        sales_pending = SaleOrder.query.filter_by(status="pending").count()
         month_pos = PurchaseOrder.query.filter(PurchaseOrder.created_at >= month_start).count()
         month_po_value = db.session.query(func.sum(PurchaseOrder.total_amount)).filter(
             PurchaseOrder.created_at >= month_start).scalar() or 0
@@ -298,6 +304,19 @@ class DashboardService:
             ym = m.strftime("%Y-%m")
             cons_chart.append({"month": month_names[m.month - 1], "value": round(cons_map.get(ym, 0), 2)})
 
+        # ── 6-month sales chart ──
+        sales_rows = db.session.query(
+            func.strftime("%Y-%m", SaleOrder.created_at).label("ym"),
+            func.sum(SaleOrder.total).label("val")
+        ).filter(SaleOrder.created_at >= six_months_ago, SaleOrder.status != "cancelled"
+        ).group_by("ym").order_by("ym").all()
+        sales_map = {r.ym: float(r.val) for r in sales_rows}
+        sales_chart = []
+        for i in range(5, -1, -1):
+            m = (today.replace(day=1) - datetime.timedelta(days=30 * i)).replace(day=1)
+            ym = m.strftime("%Y-%m")
+            sales_chart.append({"month": month_names[m.month - 1], "value": round(sales_map.get(ym, 0), 2)})
+
         return {
             "kpis": {
                 "total_items": len(items),
@@ -315,6 +334,10 @@ class DashboardService:
                 "month_po_value": round(month_po_value, 2),
                 "turnover_rate": turnover_rate,
                 "avg_storage_days": round(avg_storage_days, 1),
+                "sales_total": round(sales_total, 2),
+                "sales_month": round(sales_month, 2),
+                "sales_count": sales_count,
+                "sales_pending": sales_pending,
             },
             "warehouses": wh_stats,
             "critical_items": critical_items,
@@ -322,6 +345,7 @@ class DashboardService:
             "chart_data": chart,
             "po_chart": po_chart,
             "cons_chart": cons_chart,
+            "sales_chart": sales_chart,
             "top_items": top_items,
             "top_suppliers": supplier_data,
             "unread_notifications": unread,
