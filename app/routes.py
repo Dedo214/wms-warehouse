@@ -3613,6 +3613,17 @@ def supplier_upload_doc():
     return ok({"filename": filename}, message="✅ تم رفع المستند")
 
 # ══════════════════════════════════════════════════════════════
+#  SEED DATA
+# ══════════════════════════════════════════════════════════════
+@api.route("/seed", methods=["POST"])
+@jwt_required()
+def seed_data():
+    from app.seed_data import seed_all
+    force = (request.get_json() or {}).get("force", False)
+    res = seed_all(force=force)
+    return jsonify(res)
+
+# ══════════════════════════════════════════════════════════════
 #  AI ASSISTANT
 # ══════════════════════════════════════════════════════════════
 @api.route("/ai/query", methods=["POST"])

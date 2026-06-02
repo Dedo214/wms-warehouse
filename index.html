@@ -663,6 +663,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
           <div class="div"></div>
           <div class="ch"><div class="ct">📊 إحصائيات</div></div>
           <div id="dbst" style="font-size:13px;line-height:2;color:var(--mut)">—</div>
+          <div class="div"></div>
+          <div class="ch"><div class="ct">🧪 بيانات تجريبية</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn bp bsm" onclick="seedData(false)">🌱 إنشاء بيانات تجريبية</button>
+            <button class="btn br bsm" onclick="if(confirm('سيتم حذف جميع البيانات الموجودة واستبدالها ببيانات تجريبية. متأكد؟'))seedData(true)">⚠️ إعادة تعيين + بيانات تجريبية</button>
+          </div>
+          <div id="seedResult" style="font-size:12px;color:var(--mut);margin-top:6px"></div>
         </div>
         <div id="cfgLots" style="display:none">
           <div class="ch"><div class="ct">📦 إدارة الدفعات (Lot/Batch)</div><button class="btn bp bsm" onclick="openM('lotAdd')">+ إضافة دفعة</button></div>
@@ -2406,6 +2413,19 @@ async function loadDbStats(){const r=await $api('GET','/api/dashboard');if(!r?.s
 // ══════════════════════════════════════════════
 //  BARCODE & SEARCH
 // ══════════════════════════════════════════════
+async function seedData(force){
+  const btn=event?.target;if(btn){btn.disabled=true;btn.textContent='جاري...';}
+  document.getElementById('seedResult').textContent='⏳ جاري إنشاء البيانات...';
+  try{
+    const r=await $api('POST','/api/seed',{force});
+    if(r?.ok){
+      let s=r.stats||{};document.getElementById('seedResult').innerHTML='✅ '+r.msg+'<br>'+Object.entries(s).map(([k,v])=>`${k}: ${v}`).join(' | ');
+      toast(r.msg,'s');loadDbStats();
+    }else{document.getElementById('seedResult').textContent='❌ '+(r?.msg||'فشل');
+    toast(r?.msg||'فشل','e');}
+  }catch(e){document.getElementById('seedResult').textContent='❌ خطأ: '+e.message;toast(e.message,'e');}
+  if(btn){btn.disabled=false;btn.textContent=force?'⚠️ إعادة تعيين + بيانات تجريبية':'🌱 إنشاء بيانات تجريبية';}
+}
 async function bcLookup(inpId,selId,code){
   try{
     if(!code){
