@@ -149,8 +149,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
       <input type="text" id="api-inp" style="margin:6px 0" placeholder="http://192.168.1.X:5000">
       <button class="btn bp bsm" style="width:100%;justify-content:center;margin-top:4px" onclick="saveUrl()">حفظ الرابط</button>
       <div style="margin-top:6px;line-height:1.7;font-size:11px">
-        💻 محلي: <code>http://localhost:5000</code><br>
-        📱 موبايل: <code>http://[IP الجهاز]:5000</code>
+        💻 محلي: <code>http://localhost:5000</code> (أو اتركها فارغة)
       </div>
     </div>
     </div>
@@ -1246,9 +1245,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--prl);box-shadow:0 0 0
 function getApi(){
   const s=localStorage.getItem('wh_api');
   if(s) return s.replace(/\/$/,'');
-  const l=window.location;
-  if(l.port==='5000') return `${l.protocol}//${l.hostname}:5000`;
-  return 'http://localhost:5000';
+  return window.location.origin;
 }
 let API=getApi();
 function saveUrl(){
