@@ -10,7 +10,6 @@ from flask_jwt_extended import (
     create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity,
 )
-from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
 from app.models import (
     db, User, Warehouse, Category,     Supplier, Item,
@@ -2474,39 +2473,6 @@ def download_backup(name):
     backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
     return send_from_directory(backup_dir, name, as_attachment=True)
 
-@api.route("/settings/auto-reorder", methods=["GET"])
-@require_role("admin","manager")
-def get_auto_reorder_settings():
-    cfg = {}
-    for key in ["auto_reorder_enabled","auto_reorder_supplier_id","auto_reorder_warehouse_id"]:
-        c = BackupConfig.query.filter_by(key=key).first()
-        cfg[key] = c.value if c else ""
-    suppliers = [{"id":s.id,"name":s.name} for s in Supplier.query.filter_by(is_active=True).all()]
-    warehouses = [{"id":w.id,"name":w.name} for w in Warehouse.query.filter_by(is_active=True).all()]
-    return ok({"config": cfg, "suppliers": suppliers, "warehouses": warehouses})
-
-@api.route("/settings/auto-reorder", methods=["POST"])
-@require_role("admin","manager")
-def update_auto_reorder_settings():
-    data = request.get_json() or {}
-    for key in ["auto_reorder_enabled","auto_reorder_supplier_id","auto_reorder_warehouse_id"]:
-        if key in data:
-            c = BackupConfig.query.filter_by(key=key).first()
-            if not c:
-                c = BackupConfig(key=key, value=str(data[key]))
-                db.session.add(c)
-            else:
-                c.value = str(data[key])
-    db.session.commit()
-    return ok(message="✅ تم حفظ إعدادات التوريد التلقائي")
-
-@api.route("/auto-reorder/run", methods=["POST"])
-@require_role("admin","manager")
-def run_auto_reorder():
-    from app import auto_reorder_check
-    result = auto_reorder_check()
-    return ok(result, message=f"✅ تم إنشاء {result.get('created',0)} طلب توريد")
-
 @api.route("/backup/restore", methods=["POST"])
 @require_role("admin")
 def restore_backup():
@@ -3282,120 +3248,3 @@ def po_report():
 def supplier_report():
     profiles = SupplierProfile.query.order_by(SupplierProfile.total_evaluations.desc()).all()
     return ok([p.to_dict() for p in profiles])
-
-# ══════════════════════════════════════════════════════════════
-#  SUPPLIER PORTAL
-# ══════════════════════════════════════════════════════════════
-@api.route("/supplier/login", methods=["POST"])
-def supplier_login():
-    data = request.get_json() or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    if not username or not password: return err("اسم المستخدم وكلمة المرور مطلوبان")
-    user = User.query.filter_by(username=username).first()
-    if not user or not check_password_hash(user.password_hash, password): return err("بيانات الدخول غير صحيحة")
-    if not user.is_active: return err("الحساب غير نشط")
-    if not user.supplier_id: return err("هذا الحساب ليس لمورد")
-    supplier = Supplier.query.get(user.supplier_id)
-    if not supplier or not supplier.is_active: return err("المورد غير نشط")
-    access_token = create_access_token(identity=str(user.id), additional_claims={"supplier_id": user.supplier_id, "role": "supplier"})
-    return ok({"access_token": access_token, "user": {"id": user.id, "name": user.name, "username": user.username, "supplier_id": user.supplier_id, "supplier_name": supplier.name}})
-
-def _supplier_required():
-    uid = int(get_jwt_identity())
-    user = User.query.get(uid)
-    if not user or not user.supplier_id: return None
-    return user
-
-@api.route("/supplier/profile", methods=["GET"])
-@jwt_required()
-def supplier_get_profile():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    s = Supplier.query.get(user.supplier_id)
-    if not s: return err("المورد غير موجود")
-    p = SupplierProfile.query.filter_by(id=user.supplier_id).first()
-    return ok({"id": s.id, "name": s.name, "code": s.code, "phone": s.phone, "email": s.email, "address": s.address, "tax_number": s.tax_number, "payment_terms": s.payment_terms, "rating": p.total_evaluations if p else 0, "delivery_accuracy": p.delivery_accuracy if p else 0, "quality_score": p.quality_score if p else 0})
-
-@api.route("/supplier/profile", methods=["PUT"])
-@jwt_required()
-def supplier_update_profile():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    s = Supplier.query.get(user.supplier_id)
-    if not s: return err("المورد غير موجود")
-    data = request.get_json() or {}
-    for f in ["phone", "email", "address", "tax_number", "payment_terms"]:
-        if f in data: setattr(s, f, data[f])
-    db.session.commit()
-    return ok(message="✅ تم تحديث البيانات")
-
-@api.route("/supplier/rfqs", methods=["GET"])
-@jwt_required()
-def supplier_rfqs():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    rfqs = RFQ.query.filter(
-        RFQ.status.in_(["sent", "open"]),
-        RFQ.id.in_(db.session.query(RFQSupplier.rfq_id).filter(RFQSupplier.supplier_id == user.supplier_id))
-    ).order_by(RFQ.created_at.desc()).all()
-    result = []
-    for r in rfqs:
-        rs = RFQSupplier.query.filter_by(rfq_id=r.id, supplier_id=user.supplier_id).first()
-        existing_q = Quotation.query.filter_by(rfq_id=r.id, supplier_id=user.supplier_id).first()
-        result.append({"id": r.id, "ref_number": r.ref_number, "valid_until": r.valid_until.isoformat() if r.valid_until else "", "delivery_terms": r.delivery_terms, "notes": r.notes, "status": r.status, "created_at": r.created_at.isoformat(), "responded": rs.responded if rs else False, "has_quotation": existing_q is not None, "quotation_id": existing_q.id if existing_q else None, "items": [{"id": qi.id, "item_id": qi.item_id, "item_name": qi.item_name, "quantity": qi.quantity, "unit": qi.unit} for qi in r.items]})
-    return ok(result)
-
-@api.route("/supplier/rfqs/<int:rid>/quote", methods=["POST"])
-@jwt_required()
-def supplier_submit_quote(rid):
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    rfq = RFQ.query.get_or_404(rid)
-    existing = Quotation.query.filter_by(rfq_id=rid, supplier_id=user.supplier_id).first()
-    if existing: return err("سبق تقديم عرض سعر لهذا الطلب")
-    rs = RFQSupplier.query.filter_by(rfq_id=rid, supplier_id=user.supplier_id).first()
-    if not rs: return err("أنت غير مدرج في هذا الطلب")
-    data = request.get_json() or {}
-    items = data.get("items", [])
-    if not items: return err("يجب إضافة أصناف على الأقل")
-    q = Quotation(rfq_id=rid, supplier_id=user.supplier_id, ref_number=gen_ref("Q"), amount=data.get("amount", 0), delivery_days=data.get("delivery_days"), warranty_period=data.get("warranty_period"), valid_until=data.get("valid_until"), notes=data.get("notes"), status="submitted")
-    db.session.add(q); db.session.flush()
-    for it in items:
-        db.session.add(QuotationItem(quotation_id=q.id, item_name=it.get("item_name", ""), quantity=it.get("quantity", 0), unit_price=it.get("unit_price", 0), total=it.get("quantity", 0) * it.get("unit_price", 0)))
-    rs.responded = True
-    db.session.commit()
-    return created(q.to_dict(), message="✅ تم تقديم عرض السعر")
-
-@api.route("/supplier/orders", methods=["GET"])
-@jwt_required()
-def supplier_orders():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    orders = PurchaseOrder.query.filter_by(supplier_id=user.supplier_id).order_by(PurchaseOrder.created_at.desc()).all()
-    return ok([o.to_dict() for o in orders])
-
-@api.route("/supplier/evaluations", methods=["GET"])
-@jwt_required()
-def supplier_evaluations():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    evals = SupplierEvaluation.query.filter_by(supplier_id=user.supplier_id).order_by(SupplierEvaluation.created_at.desc()).all()
-    return ok([e.to_dict() for e in evals])
-
-@api.route("/supplier/documents", methods=["POST"])
-@jwt_required()
-def supplier_upload_doc():
-    user = _supplier_required()
-    if not user: return err("غير مصرح", 403)
-    if "file" not in request.files: return err("اختر ملفاً")
-    f = request.files["file"]
-    if f.filename == "": return err("اسم الملف فارغ")
-    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
-    if ext not in current_app.config.get("ALLOWED_EXTENSIONS", {"pdf","jpg","jpeg","png","doc","docx"}): return err("نوع الملف غير مسموح")
-    filename = secure_filename(f"supplier_{user.supplier_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{f.filename}")
-    upload_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads", "documents")
-    os.makedirs(upload_dir, exist_ok=True)
-    f.save(os.path.join(upload_dir, filename))
-    AuditService.log("upload", "supplier_document", user.supplier_id, f"مستند: {f.filename}")
-    return ok({"filename": filename}, message="✅ تم رفع المستند")

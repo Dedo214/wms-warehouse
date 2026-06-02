@@ -15,8 +15,6 @@ from app.models import (db, User, Warehouse, Category, Supplier,
                          GoodsReceipt, GRNItem,
                          PurchaseReturn, PReturnItem,
                          SupplierEvaluation, SupplierProfile)
-from sqlalchemy.orm import joinedload
-from app.utils import gen_ref
 from app.middleware import register_jwt_callbacks, register_request_hooks, register_error_handlers
 from app.routes import api
 
@@ -107,47 +105,6 @@ def create_app(cfg=None):
 def get_socketio():
     return socketio
 
-def auto_reorder_check():
-    try:
-        enabled = BackupConfig.query.filter_by(key="auto_reorder_enabled").first()
-        if not enabled or enabled.value != "true": return {"created":0,"reason":"معطل"}
-        default_supplier_id = (BackupConfig.query.filter_by(key="auto_reorder_supplier_id").first())
-        supplier_id = int(default_supplier_id.value) if default_supplier_id and default_supplier_id.value else None
-        wh_id = (BackupConfig.query.filter_by(key="auto_reorder_warehouse_id").first())
-        warehouse_id = int(wh_id.value) if wh_id and wh_id.value else None
-        if not supplier_id or not warehouse_id: return {"created":0,"reason":"البيانات ناقصة"}
-        items = Item.query.options(joinedload(Item.stocks)).filter(
-            Item.is_active == True, Item.reorder_point > 0
-        ).all()
-        to_reorder = []
-        for it in items:
-            total = sum(s.quantity for s in it.stocks)
-            if total <= it.reorder_point:
-                qty = max(it.min_quantity * 2 - total, it.reorder_point * 2)
-                to_reorder.append({"item": it, "qty": max(1, qty)})
-        if not to_reorder: return {"created":0,"reason":"لا توجد أصناف"}
-        pr = PurchaseRequest(
-            ref_number=gen_ref("PR"),
-            status="pending",
-            notes=f"أمر توريد تلقائي {datetime.datetime.now().strftime('%Y-%m-%d')}",
-            department="توريد تلقائي",
-        )
-        db.session.add(pr); db.session.flush()
-        for r in to_reorder:
-            db.session.add(PRItem(
-                pr_id=pr.id, item_id=r["item"].id,
-                item_name=r["item"].name, category=r["item"].category.name if r["item"].category else "",
-                unit=r["item"].unit, quantity=r["qty"],
-                current_stock=sum(s.quantity for s in r["item"].stocks),
-                min_stock=r["item"].min_quantity,
-                estimated_cost=r["qty"] * r["item"].unit_price,
-                notes="توريد تلقائي"
-            ))
-        db.session.commit()
-        return {"created":1, "pr_id":pr.id, "items":len(to_reorder)}
-    except Exception as e:
-        return {"created":0,"reason":str(e)[:100]}
-
 def _init_scheduler(app):
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -218,15 +175,6 @@ def _init_scheduler(app):
                 except: pass
 
         sched.add_job(auto_create_counts_job, "interval", hours=12, id="auto_create_counts", replace_existing=True)
-
-        def auto_reorder_job():
-            with app.app_context():
-                try:
-                    from app import auto_reorder_check
-                    auto_reorder_check()
-                except: pass
-
-        sched.add_job(auto_reorder_job, "interval", hours=6, id="auto_reorder", replace_existing=True)
         sched.start()
     except ImportError:
         app.logger.warning("APScheduler not installed — auto backup disabled")
