@@ -18,6 +18,9 @@ from app.models import (db, User, Warehouse, Category, Supplier, Item,
                          SupplierEvaluation, SupplierProfile, InventoryLayer,
                          ApprovalChain)
 from app.utils import gen_ref, paginate, parse_date
+from app.utils.reports import (consumption_rows, count_difference_lines,
+                               fast_slow_rows, supplier_evaluation_map,
+                               supplier_performance_rows, valuation_rows)
 
 # â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  AUDIT SERVICE
@@ -1144,16 +1147,7 @@ class ReportService:
             for col, h in enumerate(headers, 1):
                 ws.cell(row=1, column=col, value=h)
             style_header(1, len(headers))
-            diffs = (db.session.query(InventoryCountLine)
-                     .join(InventoryCount)
-                     .filter(
-                         InventoryCountLine.actual_quantity.isnot(None),
-                         InventoryCountLine.actual_quantity != InventoryCountLine.system_quantity,
-                         InventoryCount.status == "completed"
-                     )
-                     .order_by(InventoryCount.completed_at.desc())
-                     .all())
-            for ri, l in enumerate(diffs, 2):
+            for ri, l in enumerate(count_difference_lines(), 2):
                 rd = [l.id,
                       l.item.name if l.item else "",
                       l.item.code if l.item else "",
@@ -1207,20 +1201,10 @@ class ReportService:
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
             days = 30
-            since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-            rows = db.session.query(
-                StockMovement.item_id, Item.name, Item.code,
-                func.sum(StockMovement.quantity).label("total_qty"),
-                func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
-                func.count(StockMovement.id).label("mov_count")
-            ).join(Item, StockMovement.item_id == Item.id
-            ).filter(StockMovement.type.in_(["out","transfer","damage"]),
-                     StockMovement.created_at >= since
-            ).group_by(StockMovement.item_id
-            ).order_by(func.sum(StockMovement.quantity).desc()
-            ).limit(50).all()
-            for ri, r in enumerate(rows, 3):
-                rd = [r[1], r[2], int(r[3]), round(float(r[4] or 0),2), r[5], round(float(r[3])/max(days,1),2)]
+            for ri, r in enumerate(consumption_rows(days, 50), 3):
+                rd = [r.item_name, r.item_code, int(r.total_qty),
+                      round(float(r.total_value or 0),2), r.movements,
+                      round(float(r.total_qty)/max(days,1),2)]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0)
@@ -1236,27 +1220,15 @@ class ReportService:
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
-            days = 90
-            since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-            out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
-                StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
-            ).group_by(StockMovement.item_id).subquery()
-            items = db.session.query(Item.id, Item.name, Item.code,
-                                     func.coalesce(out_q.c.qty, 0).label("consumed"),
-                                     func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
-            ).outerjoin(out_q, Item.id == out_q.c.item_id
-            ).outerjoin(Stock, Stock.item_id == Item.id
-            ).group_by(Item.id).all()
-            fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:10]
-            slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:10]
+            fast, slow = fast_slow_rows(90, 10)
             ri = 3
             for i in fast:
-                rd = ["ط³ط±ظٹط¹ ط§ظ„ط­ط±ظƒط©", i[1], int(i[3]), int(i[4])]
+                rd = ["ط³ط±ظٹط¹ ط§ظ„ط­ط±ظƒط©", i.item_name, int(i.consumed), int(i.current_stock)]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0); ri += 1
             for i in slow:
-                rd = ["ط¨ط·ظٹط، ط§ظ„ط­ط±ظƒط©", i[1], int(i[3]), int(i[4])]
+                rd = ["ط¨ط·ظٹط، ط§ظ„ط­ط±ظƒط©", i.item_name, int(i.consumed), int(i.current_stock)]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0); ri += 1
@@ -1272,24 +1244,12 @@ class ReportService:
             for col, h in enumerate(headers, 1):
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
-            sp_rows = db.session.query(
-                Supplier.id, Supplier.name,
-                func.count(PurchaseOrder.id).label("po_count"),
-                func.sum(PurchaseOrder.total_amount).label("total_amount"),
-                func.count(GoodsReceipt.id).label("grn_count"),
-            ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
-            ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
-            ).group_by(Supplier.id).all()
-            sp_evals = SupplierEvaluation.query.with_entities(
-                SupplierEvaluation.supplier_id,
-                func.avg(SupplierEvaluation.quality).label("avg_quality"),
-                func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
-            ).group_by(SupplierEvaluation.supplier_id).all()
-            sp_emap = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1)} for e in sp_evals}
-            for ri, r in enumerate(sp_rows, 3):
-                ev = sp_emap.get(r[0],{})
+            sp_emap = supplier_evaluation_map()
+            for ri, r in enumerate(supplier_performance_rows(), 3):
+                ev = sp_emap.get(r.supplier_id,{})
                 avg = (ev.get("delivery",0) + ev.get("quality",0))/2
-                rd = [r[1] or "", r[2] or 0, round(float(r[3] or 0),2), r[4] or 0,
+                rd = [r.supplier_name or "", r.po_count or 0,
+                      round(float(r.total_amount or 0),2), r.grn_count or 0,
                       ev.get("delivery",0), ev.get("quality",0), round(avg,1)]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
@@ -1307,15 +1267,13 @@ class ReportService:
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
             ri = 3
-            for it in Item.query.filter_by(is_active=True).order_by(Item.name).all():
-                v = InventoryLayer.get_valuation(it.id)
-                if v["total_qty"] > 0:
-                    rd = [it.name, it.code, v["total_qty"],
-                          round(v["avg_cost"],2) if v["avg_cost"] else 0,
-                          round(v["total_value"],2), v["layer_count"]]
-                    for col, val in enumerate(rd, 1):
-                        ws.cell(row=ri, column=col, value=val)
-                    style_row(ri, len(headers), alt=ri%2==0); ri += 1
+            for it, v in valuation_rows():
+                rd = [it.name, it.code, v["total_qty"],
+                      round(v["avg_cost"],2) if v["avg_cost"] else 0,
+                      round(v["total_value"],2), v["layer_count"]]
+                for col, val in enumerate(rd, 1):
+                    ws.cell(row=ri, column=col, value=val)
+                style_row(ri, len(headers), alt=ri%2==0); ri += 1
 
         elif report_type == "audit":
             from app.services import AuditService

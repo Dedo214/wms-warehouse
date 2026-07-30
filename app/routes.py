@@ -2,17 +2,13 @@
 جميع مسارات الـ API — All API Routes
 Blueprint واحد يجمع كل المسارات
 """
-import datetime, io, json, os, smtplib, mimetypes, urllib.parse
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import datetime, io, json, os, mimetypes, urllib.parse
 from flask import Blueprint, request, send_file, g, current_app, send_from_directory
 from flask_jwt_extended import (
-    create_access_token, create_refresh_token,
-    jwt_required, get_jwt_identity,
+    create_access_token, create_refresh_token, jwt_required,
 )
 from sqlalchemy import func
 from werkzeug.security import check_password_hash
-from werkzeug.utils import secure_filename
 from app.models import (
     db, User, Warehouse, Category,     Supplier, Item,
     Stock, StockMovement, Transfer, InventoryCount,
@@ -29,29 +25,6 @@ from app.models import (
     Lot, UnitConversion, ApprovalChain, ApprovalStep, ScheduledCount,
 )
 
-def send_notif_email(subject, body, to=None):
-    try:
-        host = NotificationConfig.query.filter_by(key="smtp_host").first()
-        port = NotificationConfig.query.filter_by(key="smtp_port").first()
-        user = NotificationConfig.query.filter_by(key="smtp_user").first()
-        pwd  = NotificationConfig.query.filter_by(key="smtp_pass").first()
-        frm  = NotificationConfig.query.filter_by(key="email_from").first()
-        enb  = NotificationConfig.query.filter_by(key="email_enabled").first()
-        if not host or not host.value or (enb and enb.value != "true"): return
-        recipients = [to] if to else [u.email for u in User.query.filter(User.role.in_(["admin","super_admin"])).all() if u.email]
-        for r in recipients:
-            try:
-                msg = MIMEMultipart()
-                msg["From"] = frm.value if frm else user.value if user else "noreply@wms.local"
-                msg["To"] = r; msg["Subject"] = subject
-                msg.attach(MIMEText(body, "plain", "utf-8"))
-                with smtplib.SMTP(host.value, int(port.value if port else 587), timeout=10) as s:
-                    s.starttls()
-                    if user and user.value and pwd and pwd.value: s.login(user.value, pwd.value)
-                    s.send_message(msg)
-            except: pass
-    except: pass
-
 def _uname(uid): u = User.query.get(uid); return u.name if u else "—"
 
 from app.services import (
@@ -61,13 +34,35 @@ from app.services import (
     AuditService,
     StockInquiryService,
 )
-from app.utils import ok, created, err, not_found, forbidden, unauthorized, require_role, validate, gen_ref, parse_date, today_str
+from app.services import backup as backup_service
+from app.services.mailer import send_email, send_notification_email, smtp_settings
+from app.utils import (ok, created, err, not_found, forbidden, unauthorized,
+                       require_role, validate, gen_ref, parse_date, today_str,
+                       apply_fields, args_filters, current_uid, current_user,
+                       barcode_png, barcode_png_file,
+                       config_map, config_get, config_save,
+                       csv_download, export_filename, pdf_download,
+                       rows_to_csv, rows_to_xlsx, xlsx_download,
+                       IMAGE_EXTENSIONS, MAX_IMAGE_SIZE,
+                       file_ext, unique_filename,
+                       validate_upload, backups_dir, db_file_path, uploads_dir)
+from app.utils.reports import (consumption_rows, count_difference_lines,
+                               fast_slow_rows, supplier_evaluation_map,
+                               supplier_performance_rows, valuation_rows)
 from app.limiter import limiter
 
 api = Blueprint("api", __name__, url_prefix="/api")
 
-MAX_FILE_SIZE = 16 * 1024 * 1024  # 16 MB
-ALLOWED_EXTENSIONS = {"pdf","jpg","jpeg","png","gif","doc","docx","xls","xlsx","csv","txt","zip"}
+AUDIT_FILTER_KEYS = ["user_id","action","resource","date_from","date_to","search"]
+NOTIF_SETTING_KEYS = ["whatsapp_enabled","whatsapp_number","whatsapp_cloud_api",
+                      "whatsapp_token","whatsapp_phone_id","email_enabled",
+                      "smtp_host","smtp_port","smtp_user","smtp_pass",
+                      "email_from","notify_low_stock","notify_transfer"]
+BACKUP_SETTING_KEYS = ["auto_backup_enabled","backup_interval_hours",
+                       "backup_keep_count","last_backup"]
+AUTO_REORDER_KEYS = ["auto_reorder_enabled","auto_reorder_supplier_id",
+                     "auto_reorder_warehouse_id"]
+ATTACHMENT_TYPE_ERROR = "نوع الملف غير مسموح: يرجى رفع PDF, صور, مستندات Office أو CSV/ZIP فقط"
 
 # ══════════════════════════════════════════════════════════════
 #  AUTH
@@ -108,7 +103,7 @@ def login():
 @jwt_required(refresh=True)
 @limiter.limit("20 per minute")
 def refresh():
-    uid  = int(get_jwt_identity())
+    uid  = current_uid()
     user = User.query.get(uid)
     if not user or not user.is_active:
         return unauthorized("الحساب غير صالح")
@@ -117,7 +112,7 @@ def refresh():
 @api.route("/auth/logout", methods=["POST"])
 @jwt_required()
 def logout():
-    uid  = int(get_jwt_identity())
+    uid  = current_uid()
     user = User.query.get(uid)
     if user:
         AuditService.log("logout","auth",uid,f"خروج: {user.name}")
@@ -127,7 +122,7 @@ def logout():
 @api.route("/auth/me", methods=["GET"])
 @jwt_required()
 def me():
-    user = User.query.get(get_jwt_identity())
+    user = current_user()
     if not user:
         return not_found("المستخدم غير موجود")
     return ok({"user":user.to_dict(),"permissions":user.get_permissions()})
@@ -135,7 +130,7 @@ def me():
 @api.route("/auth/change-password", methods=["POST"])
 @jwt_required()
 def change_password():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data = request.get_json() or {}
     ok_flag, error = AuthService.change_password(
         uid, data.get("old_password",""), data.get("new_password","")
@@ -155,7 +150,7 @@ def dashboard():
     responses:
       200: {description: Dashboard data with KPIs, warehouses, critical items}
     """
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data = DashboardService.get_data(uid)
     return ok(data)
 
@@ -190,8 +185,7 @@ def create_warehouse():
 def update_warehouse(wid):
     wh   = Warehouse.query.get_or_404(wid)
     data = request.get_json() or {}
-    for f in ["name","location","capacity","type","is_active"]:
-        if f in data: setattr(wh,f,data[f])
+    apply_fields(wh, data, ["name","location","capacity","type","is_active"])
     AuditService.log("update","warehouse",wid,f"تحديث: {wh.name}")
     db.session.commit()
     return ok(wh.to_dict())
@@ -220,8 +214,7 @@ def create_category():
 def update_category(cid):
     c    = Category.query.get_or_404(cid)
     data = request.get_json() or {}
-    for f in ["name","color","icon"]:
-        if f in data: setattr(c,f,data[f])
+    apply_fields(c, data, ["name","color","icon"])
     db.session.commit()
     return ok(c.to_dict())
 
@@ -288,9 +281,8 @@ def get_item(iid):
 @api.route("/items", methods=["POST"])
 @jwt_required()
 def create_item():
-    uid  = int(get_jwt_identity())
-    user = User.query.get(uid)
-    if user.role == "viewer": return forbidden("ليس لديك صلاحية")
+    uid  = current_uid()
+    if current_user().role == "viewer": return forbidden("ليس لديك صلاحية")
     data = request.get_json() or {}
     errs = validate(data, ["name","code"])
     if errs: return err("بيانات ناقصة", errors=errs)
@@ -301,7 +293,7 @@ def create_item():
 @api.route("/items/<int:iid>", methods=["PUT"])
 @jwt_required()
 def update_item(iid):
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data = request.get_json() or {}
     item, error = ItemService.update(iid, data, uid)
     if error: return err(error)
@@ -336,7 +328,7 @@ def import_items():
             rows.append(dict(zip(header, r)))
     else:
         return err("الرجاء رفع ملف CSV أو Excel")
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     for i, row in enumerate(rows, 2):
         try:
             name = str(row.get("name","") or row.get("اسم الصنف","") or "").strip()
@@ -372,17 +364,11 @@ def import_items():
 @jwt_required()
 def item_barcode_img(iid):
     item = Item.query.get_or_404(iid)
-    code = item.barcode or item.code
-    try:
-        import barcode as bc_lib
-        from barcode.writer import ImageWriter
-        code128 = bc_lib.get_barcode_class("code128")
-        bc = code128(code, writer=ImageWriter())
-        buf = io.BytesIO(); bc.write(buf); buf.seek(0)
-        return send_file(buf, mimetype="image/png",
-                         download_name=f"{item.code}_barcode.png")
-    except ImportError:
+    buf = barcode_png(item.barcode or item.code)
+    if not buf:
         return err("مكتبة barcode غير مثبتة. قم بتشغيل: pip install python-barcode")
+    return send_file(buf, mimetype="image/png",
+                     download_name=f"{item.code}_barcode.png")
 
 @api.route("/items/<int:iid>/barcode/label", methods=["GET"])
 @jwt_required()
@@ -394,15 +380,7 @@ def item_barcode_label(iid):
     from reportlab.lib.styles import getSampleStyleSheet
     import tempfile, os
     code = item.barcode or item.code
-    tmp = os.path.join(tempfile.gettempdir(), f"bcode_{item.id}.png")
-    try:
-        import barcode as bc_lib
-        from barcode.writer import ImageWriter
-        code128 = bc_lib.get_barcode_class("code128")
-        bc = code128(code, writer=ImageWriter())
-        with open(tmp, "wb") as f: bc.write(f)
-    except ImportError:
-        tmp = None
+    tmp = barcode_png_file(code, os.path.join(tempfile.gettempdir(), f"bcode_{item.id}.png"))
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=(100*mm, 60*mm),
                             rightMargin=5*mm, leftMargin=5*mm,
@@ -417,8 +395,7 @@ def item_barcode_label(iid):
     if tmp and os.path.isfile(tmp):
         try: os.remove(tmp)
         except: pass
-    return send_file(buf, mimetype="application/pdf",
-                     download_name=f"{item.code}_label.pdf")
+    return pdf_download(buf, f"{item.code}_label.pdf", as_attachment=False)
 
 @api.route("/items/bulk-labels", methods=["POST"])
 @jwt_required()
@@ -441,15 +418,7 @@ def bulk_barcode_labels():
     elems = []
     for item in items:
         code = item.barcode or item.code
-        png = os.path.join(tempfile.gettempdir(), f"bc_{item.id}.png")
-        try:
-            import barcode as bc_lib
-            from barcode.writer import ImageWriter
-            code128 = bc_lib.get_barcode_class("code128")
-            bc = code128(code, writer=ImageWriter())
-            with open(png, "wb") as f: bc.write(f)
-        except ImportError:
-            png = None
+        png = barcode_png_file(code, os.path.join(tempfile.gettempdir(), f"bc_{item.id}.png"))
         elems.append(Paragraph(f"<b>{item.name}</b>", styles["Normal"]))
         elems.append(Paragraph(f"الكود: {code} | {item.unit}", styles["Normal"]))
         if png and os.path.isfile(png):
@@ -459,26 +428,18 @@ def bulk_barcode_labels():
     for item in items:
         p = os.path.join(tempfile.gettempdir(), f"bc_{item.id}.png")
         if os.path.isfile(p): os.remove(p)
-    return send_file(buf, mimetype="application/pdf",
-                     download_name=f"bulk_barcodes_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                     as_attachment=True)
+    return pdf_download(buf, export_filename("bulk_barcodes", "pdf"))
 
 @api.route("/items/<int:iid>/image", methods=["POST"])
 @jwt_required()
 def upload_item_image(iid):
     item = Item.query.get_or_404(iid)
     f = request.files.get("file")
-    if not f: return err("الملف مطلوب")
-    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
-    if ext not in {"jpg","jpeg","png","gif","webp"}:
-        return err("نوع الملف غير مسموح: JPG, PNG, GIF, WEBP فقط")
-    f.seek(0, os.SEEK_END); fsize = f.tell(); f.seek(0)
-    if fsize > 5 * 1024 * 1024: return err("حجم الملف يتجاوز 5 ميجابايت")
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = f"item_img_{iid}_{ts}.{ext}"
-    folder = os.path.join(current_app.root_path, "..", "uploads", "images")
-    os.makedirs(folder, exist_ok=True)
-    f.save(os.path.join(folder, safe_name))
+    error = validate_upload(f, IMAGE_EXTENSIONS, MAX_IMAGE_SIZE,
+                            "نوع الملف غير مسموح: JPG, PNG, GIF, WEBP فقط")
+    if error: return err(error)
+    safe_name = unique_filename(f"item_img_{iid}", ext=file_ext(f))
+    f.save(os.path.join(uploads_dir("images"), safe_name))
     item.image_url = f"/uploads/images/{safe_name}"
     db.session.commit()
     AuditService.log("upload","item_image",iid,f"رفع صورة للصنف {item.name}")
@@ -487,8 +448,7 @@ def upload_item_image(iid):
 @api.route("/uploads/images/<path:filename>", methods=["GET"])
 @jwt_required()
 def serve_item_image(filename):
-    folder = os.path.join(current_app.root_path, "..", "uploads", "images")
-    return send_from_directory(folder, filename)
+    return send_from_directory(uploads_dir("images"), filename)
 
 # ══════════════════════════════════════════════════════════════
 #  STOCK MOVEMENTS
@@ -567,8 +527,7 @@ def movement_invoice(mid):
         elems.append(Spacer(1, 0.3*cm))
         elems.append(Paragraph(f"<b>ملاحظات:</b> {mov.notes}", styles["Normal"]))
     doc.build(elems); buf.seek(0)
-    return send_file(buf, mimetype="application/pdf",
-                     download_name=f"invoice_{mov.id:05d}.pdf", as_attachment=True)
+    return pdf_download(buf, f"invoice_{mov.id:05d}.pdf")
 
 @api.route("/movements", methods=["POST"])
 @jwt_required()
@@ -590,7 +549,7 @@ def create_movement():
     responses:
       201: {description: Movement created}
     """
-    uid  = int(get_jwt_identity())
+    uid  = current_uid()
     user = User.query.get(uid)
     if user.role == "viewer": return forbidden("ليس لديك صلاحية تسجيل الحركات")
     data = request.get_json() or {}
@@ -602,7 +561,7 @@ def create_movement():
     if data.get("type") in ("out","damage","transfer"):
         item = Item.query.get(data["item_id"])
         if item and item.get_total_stock() <= item.min_quantity:
-            send_notif_email(f"⚠️ تنبيه نفاد: {item.name}",
+            send_notification_email(f"⚠️ تنبيه نفاد: {item.name}",
                 f"نفاذ مخزون الصنف: {item.name} ({item.code})\n"
                 f"المتبقي: {item.get_total_stock()} {item.unit}\n"
                 f"الحد الأدنى: {item.min_quantity} {item.unit}")
@@ -620,7 +579,7 @@ def get_transfers():
 @api.route("/transfers", methods=["POST"])
 @jwt_required()
 def create_transfer():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data = request.get_json() or {}
     errs = validate(data, ["item_id","from_warehouse_id","to_warehouse_id","quantity","reason"])
     if errs: return err("بيانات ناقصة", errors=errs)
@@ -628,7 +587,7 @@ def create_transfer():
     if error: return err(error)
     item = Item.query.get(data["item_id"])
     to_wh = Warehouse.query.get(data["to_warehouse_id"])
-    send_notif_email(f"🔄 تحويل جديد: {tr.ref_number}",
+    send_notification_email(f"🔄 تحويل جديد: {tr.ref_number}",
         f"تم إنشاء تحويل جديد:\nالصنف: {item.name if item else '—'}\n"
         f"الكمية: {data['quantity']}\nإلى: {to_wh.name if to_wh else '—'}\n"
         f"السبب: {data.get('reason','')}\nالطالب: {_uname(uid)}")
@@ -671,7 +630,7 @@ def _process_chain_approval(entity, uid, resource_type):
 @api.route("/transfers/<int:tid>/approve", methods=["POST"])
 @require_role("admin","manager")
 def approve_transfer(tid):
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     tr = Transfer.query.get_or_404(tid)
     if tr.status != "pending":
         return err("تمت معالجة هذا الطلب مسبقاً")
@@ -687,7 +646,7 @@ def approve_transfer(tid):
 @api.route("/transfers/<int:tid>/reject", methods=["POST"])
 @require_role("admin","manager")
 def reject_transfer(tid):
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data   = request.get_json() or {}
     tr, error = TransferService.reject(tid, uid, data.get("reason",""))
     if error: return err(error)
@@ -699,7 +658,7 @@ def reject_transfer(tid):
 @api.route("/stock/adjust", methods=["POST"])
 @jwt_required()
 def adjust_stock():
-    uid  = int(get_jwt_identity())
+    uid  = current_uid()
     user = User.query.get(uid)
     if user.role == "viewer": return forbidden("ليس لديك صلاحية")
     data = request.get_json() or {}
@@ -720,7 +679,7 @@ def get_counts():
 @api.route("/counts", methods=["POST"])
 @jwt_required()
 def create_count():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     data = request.get_json() or {}
     count, error = CountService.create(data, uid)
     if error: return err(error)
@@ -747,7 +706,7 @@ def update_count_line(cid, lid):
 @api.route("/counts/<int:cid>/complete", methods=["POST"])
 @jwt_required()
 def complete_count(cid):
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     result, error = CountService.complete(cid, uid)
     if error: return err(error)
     return ok({"differences":result["differences"]}, "تم إغلاق الجرد وتسوية الفروقات")
@@ -774,8 +733,7 @@ def create_schedule_count():
 def update_schedule_count(sid):
     sc = ScheduledCount.query.get_or_404(sid)
     data = request.get_json() or {}
-    for f in ["warehouse_id","frequency","day_of_month","day_of_week","is_active"]:
-        if f in data: setattr(sc, f, data[f])
+    apply_fields(sc, data, ["warehouse_id","frequency","day_of_month","day_of_week","is_active"])
     db.session.commit()
     return ok(sc.to_dict())
 
@@ -853,10 +811,8 @@ def create_project():
 def update_project(pid):
     p = Project.query.get_or_404(pid)
     data = request.get_json() or {}
-    for f in ("name","code","description","status","client","location"):
-        if f in data: setattr(p, f, data[f])
-    for f in ("budget","actual_cost","completion_pct"):
-        if f in data: setattr(p, f, float(data[f]))
+    apply_fields(p, data, ["name","code","description","status","client","location"])
+    apply_fields(p, data, ["budget","actual_cost","completion_pct"], cast=float)
     AuditService.log("edit","project",pid,f"تعديل مشروع: {p.name}")
     db.session.commit()
     return ok(p.to_dict())
@@ -900,8 +856,7 @@ def create_project_invoice(pid):
 def update_project_invoice(iid):
     inv = ProjectInvoice.query.get_or_404(iid)
     data = request.get_json() or {}
-    for f in ("ref_number","description","status"):
-        if f in data: setattr(inv, f, data[f])
+    apply_fields(inv, data, ["ref_number","description","status"])
     if "amount" in data:
         inv.amount = float(data["amount"])
     AuditService.log("edit","project_invoice",iid,f"تعديل مستخلص")
@@ -947,16 +902,16 @@ def create_user():
 @api.route("/users/<int:uid>", methods=["PUT"])
 @require_role("admin")
 def update_user(uid):
-    current_uid = int(get_jwt_identity())
+    actor_uid = current_uid()
     data = request.get_json() or {}
-    user, error = UserService.update(uid, data, current_uid)
+    user, error = UserService.update(uid, data, actor_uid)
     if error: return err(error)
     return ok(user.to_dict())
 
 @api.route("/users/<int:uid>", methods=["DELETE"])
 @require_role("admin")
 def delete_user(uid):
-    if uid == get_jwt_identity():
+    if uid == current_uid():
         return err("لا يمكن حذف حسابك الخاص")
     u = User.query.get_or_404(uid)
     u.is_active = False
@@ -970,7 +925,7 @@ def delete_user(uid):
 @api.route("/notifications", methods=["GET"])
 @jwt_required()
 def get_notifications():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     notifs = (Notification.query
               .filter_by(user_id=uid)
               .order_by(Notification.created_at.desc())
@@ -981,7 +936,7 @@ def get_notifications():
 @api.route("/notifications/read-all", methods=["POST"])
 @jwt_required()
 def read_all_notifications():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     Notification.query.filter_by(user_id=uid, is_read=False).update({"is_read":True})
     db.session.commit()
     return ok(message="تم تحديد الكل كمقروء")
@@ -1002,10 +957,7 @@ def read_notification(nid):
 def get_audit_logs():
     page     = int(request.args.get("page",1))
     per_page = int(request.args.get("per_page",50))
-    filters = {}
-    for k in ["user_id","action","resource","date_from","date_to","search"]:
-        v = request.args.get(k)
-        if v: filters[k] = v
+    filters = args_filters(*AUDIT_FILTER_KEYS)
     result   = AuditService.get_logs(page, per_page, filters)
     return ok({"logs":[l.to_dict() for l in result["items"]],
                "total":result["total"],"pages":result["pages"]})
@@ -1015,10 +967,7 @@ def get_audit_logs():
 def export_audit_logs():
     import csv
     fmt = request.args.get("format","csv")
-    filters = {}
-    for k in ["user_id","action","resource","date_from","date_to","search"]:
-        v = request.args.get(k)
-        if v: filters[k] = v
+    filters = args_filters(*AUDIT_FILTER_KEYS)
     result = AuditService.get_logs(1, 99999, filters)
     logs = [l.to_dict() for l in result["items"]]
     output = io.StringIO()
@@ -1030,10 +979,7 @@ def export_audit_logs():
                     f"{l['resource']}#{l['resource_id']}" if l['resource_id'] else l['resource'],
                     l["description"] or "",l["ip_address"] or "",
                     l["old_data"] or "",l["new_data"] or ""])
-    buf = io.BytesIO(output.getvalue().encode("utf-8-sig"))
-    fname = f"audit_logs_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
-    return send_file(buf, mimetype="text/csv;charset=utf-8",
-                     download_name=fname, as_attachment=True)
+    return csv_download(output, export_filename("audit_logs", "csv", "%Y%m%d"))
 
 # ══════════════════════════════════════════════════════════════
 #  REPORTS
@@ -1078,12 +1024,7 @@ def report_budget():
 def export_excel():
     rtype  = request.args.get("type","balance")
     buf    = ReportService.export_excel(rtype)
-    fname  = f"warehouse_{rtype}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    return send_file(
-        buf,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        download_name=fname, as_attachment=True,
-    )
+    return xlsx_download(buf, export_filename(f"warehouse_{rtype}", "xlsx"))
 
 # ══════════════════════════════════════════════════════════════
 #  PROCUREMENT EXPORTS
@@ -1091,8 +1032,6 @@ def export_excel():
 @api.route("/procurement/export/<fmt>", methods=["GET"])
 @jwt_required()
 def procurement_export(fmt):
-    from io import StringIO
-    import csv
     rtype = request.args.get("type","pr")
     data = []
     headers = []
@@ -1115,20 +1054,10 @@ def procurement_export(fmt):
     else:
         return not_found("نوع التقرير غير معروف")
     if fmt == "xlsx":
-        import openpyxl
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = fname_base
-        ws.append(headers)
-        for row in data: ws.append(row)
-        buf = io.BytesIO()
-        wb.save(buf); buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name=f"procurement_{fname_base}.xlsx", as_attachment=True)
+        return xlsx_download(rows_to_xlsx(headers, data, fname_base),
+                             f"procurement_{fname_base}.xlsx")
     elif fmt == "csv":
-        buf = StringIO()
-        w = csv.writer(buf); w.writerow(headers); w.writerows(data)
-        b = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
-        return send_file(b, mimetype="text/csv", download_name=f"procurement_{fname_base}.csv", as_attachment=True)
+        return csv_download(rows_to_csv(headers, data), f"procurement_{fname_base}.csv")
     elif fmt == "pdf":
         from reportlab.lib.pagesizes import A4, landscape
         from reportlab.lib import colors
@@ -1156,7 +1085,7 @@ def procurement_export(fmt):
         tbl.setStyle(ts)
         elements.append(tbl)
         doc.build(elements); buf.seek(0)
-        return send_file(buf, mimetype="application/pdf", download_name=f"procurement_{fname_base}.pdf", as_attachment=True)
+        return pdf_download(buf, f"procurement_{fname_base}.pdf")
     return not_found("نوع الملف غير معروف")
 
 # ══════════════════════════════════════════════════════════════
@@ -1258,8 +1187,7 @@ def create_lot():
 def update_lot(lid):
     lot = Lot.query.get_or_404(lid)
     data = request.get_json() or {}
-    for f in ["lot_number","status"]:
-        if f in data: setattr(lot, f, data[f])
+    apply_fields(lot, data, ["lot_number","status"])
     if "expiry_date" in data:
         lot.expiry_date = datetime.datetime.strptime(data["expiry_date"],"%Y-%m-%d") if data["expiry_date"] else None
     db.session.commit()
@@ -1346,8 +1274,7 @@ def create_approval_chain():
 def update_approval_chain(cid):
     chain = ApprovalChain.query.get_or_404(cid)
     data = request.get_json() or {}
-    for f in ["name","target_type","is_active"]:
-        if f in data: setattr(chain, f, data[f])
+    apply_fields(chain, data, ["name","target_type","is_active"])
     if "steps" in data:
         ApprovalStep.query.filter_by(chain_id=cid).delete()
         for i, s in enumerate(data["steps"]):
@@ -1370,65 +1297,33 @@ def delete_approval_chain(cid):
 @jwt_required()
 def consumption_report():
     days = int(request.args.get("days", 30))
-    since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
     limit = int(request.args.get("limit", 20))
     order = request.args.get("order", "desc")
-    rows = db.session.query(
-        StockMovement.item_id, Item.name, Item.code, Item.unit,
-        func.sum(StockMovement.quantity).label("total_qty"),
-        func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
-        func.count(StockMovement.id).label("mov_count")
-    ).join(Item, StockMovement.item_id == Item.id
-    ).filter(StockMovement.type.in_(["out","transfer","damage"]),
-             StockMovement.created_at >= since
-    ).group_by(StockMovement.item_id
-    ).order_by(func.sum(StockMovement.quantity).desc() if order=="desc" else func.sum(StockMovement.quantity).asc()
-    ).limit(limit).all()
-    data = [{"item_id":r[0],"item_name":r[1],"item_code":r[2],"item_unit":r[3],
-             "total_qty":float(r[4]),"total_value":round(float(r[5] or 0),2),"movements":r[6],
-             "avg_per_day":round(float(r[4])/max(days,1),2)} for r in rows]
+    rows = consumption_rows(days, limit, order)
+    data = [{"item_id":r.item_id,"item_name":r.item_name,"item_code":r.item_code,
+             "item_unit":r.item_unit,"total_qty":float(r.total_qty),
+             "total_value":round(float(r.total_value or 0),2),"movements":r.movements,
+             "avg_per_day":round(float(r.total_qty)/max(days,1),2)} for r in rows]
     return ok({"items":data, "period_days":days, "order":order, "total":len(data)})
 
 @api.route("/reports/fast-slow", methods=["GET"])
 @jwt_required()
 def fast_slow_report():
     days = int(request.args.get("days", 90))
-    since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
     limit = int(request.args.get("limit", 10))
-    out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
-        StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
-    ).group_by(StockMovement.item_id).subquery()
-    items = db.session.query(Item.id, Item.name, Item.code, Item.unit, Item.unit_price,
-                             func.coalesce(out_q.c.qty, 0).label("consumed"),
-                             func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
-    ).outerjoin(out_q, Item.id == out_q.c.item_id
-    ).outerjoin(Stock, Stock.item_id == Item.id
-    ).group_by(Item.id).all()
-    fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
-    slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
-    def fmt(i): return {"item_id":i[0],"item_name":i[1],"item_code":i[2],"item_unit":i[3],"unit_price":float(i[4] or 0),"consumed":float(i[5] or 0),"current_stock":float(i[6] or 0)}
-    return ok({"fast_moving":[fmt(i) for i in fast],"slow_moving":[fmt(i) for i in slow],"period_days":days})
+    fast, slow = fast_slow_rows(days, limit)
+    def fmt(r): return {"item_id":r.item_id,"item_name":r.item_name,"item_code":r.item_code,
+                        "item_unit":r.item_unit,"unit_price":float(r.unit_price or 0),
+                        "consumed":float(r.consumed or 0),"current_stock":float(r.current_stock or 0)}
+    return ok({"fast_moving":[fmt(r) for r in fast],"slow_moving":[fmt(r) for r in slow],"period_days":days})
 
 @api.route("/reports/supplier-performance", methods=["GET"])
 @jwt_required()
 def supplier_performance():
-    rows = db.session.query(
-        Supplier.id, Supplier.name,
-        func.count(PurchaseOrder.id).label("po_count"),
-        func.sum(PurchaseOrder.total_amount).label("total_amount"),
-        func.count(GoodsReceipt.id).label("grn_count"),
-    ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
-    ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
-    ).group_by(Supplier.id).all()
-    data = [{"supplier_id":r[0],"supplier_name":r[1],"po_count":r[2],"total_amount":float(r[3] or 0),
-             "grn_count":r[4]} for r in rows]
-    evals = SupplierEvaluation.query.with_entities(
-        SupplierEvaluation.supplier_id,
-        func.avg(SupplierEvaluation.quality).label("avg_quality"),
-        func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
-        func.avg(SupplierEvaluation.price).label("avg_price")
-    ).group_by(SupplierEvaluation.supplier_id).all()
-    eval_map = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1),"price":round(float(e[3] or 0),1)} for e in evals}
+    data = [{"supplier_id":r.supplier_id,"supplier_name":r.supplier_name,
+             "po_count":r.po_count,"total_amount":float(r.total_amount or 0),
+             "grn_count":r.grn_count} for r in supplier_performance_rows()]
+    eval_map = supplier_evaluation_map()
     for d in data:
         d["evaluations"] = eval_map.get(d["supplier_id"], {})
     return ok(data)
@@ -1473,24 +1368,13 @@ def abc_analysis():
 @api.route("/attachments", methods=["POST"])
 @jwt_required()
 def upload_attachment():
-    if "file" not in request.files:
-        return err("الملف مطلوب")
-    f = request.files["file"]
-    if not f.filename: return err("اسم الملف مطلوب")
-    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
-    if ext not in ALLOWED_EXTENSIONS:
-        return err("نوع الملف غير مسموح: يرجى رفع PDF, صور, مستندات Office أو CSV/ZIP فقط")
-    f.seek(0, os.SEEK_END)
-    fsize = f.tell()
-    f.seek(0)
-    if fsize > MAX_FILE_SIZE:
-        return err("حجم الملف يتجاوز 16 ميجابايت")
+    f = request.files.get("file")
+    error = validate_upload(f, type_message=ATTACHMENT_TYPE_ERROR)
+    if error: return err(error)
     ref_type = request.form.get("ref_type", "item")
     ref_id = request.form.get("ref_id", type=int)
-    upload_dir = os.path.join(current_app.root_path, "..", "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
-    safe_name = f"{ref_type}_{ref_id}_{int(datetime.datetime.utcnow().timestamp())}_{secure_filename(f.filename)}"
-    path = os.path.join(upload_dir, safe_name)
+    safe_name = unique_filename(f"{ref_type}_{ref_id}", f.filename)
+    path = os.path.join(uploads_dir(), safe_name)
     f.save(path)
     size = os.path.getsize(path)
     att = ItemAttachment(
@@ -1518,14 +1402,13 @@ def list_attachments():
 @jwt_required()
 def download_attachment(aid):
     att = ItemAttachment.query.get_or_404(aid)
-    upload_dir = os.path.join(current_app.root_path, "..", "uploads")
-    return send_from_directory(upload_dir, att.filename, as_attachment=True, download_name=att.original_name)
+    return send_from_directory(uploads_dir(), att.filename, as_attachment=True, download_name=att.original_name)
 
 @api.route("/attachments/<int:aid>", methods=["DELETE"])
 @require_role("admin","manager")
 def delete_attachment(aid):
     att = ItemAttachment.query.get_or_404(aid)
-    path = os.path.join(current_app.root_path, "..", "uploads", att.filename)
+    path = os.path.join(uploads_dir(), att.filename)
     if os.path.isfile(path): os.remove(path)
     db.session.delete(att)
     AuditService.log("delete","attachment",aid,f"حذف ملف: {att.original_name}")
@@ -1745,16 +1628,7 @@ def export_csv():
     elif rtype == "diffs":
         writer.writerow(["#","الصنف","كود الصنف","المخزن","كمية النظام",
                          "الكمية الفعلية","الفرق","ملاحظات","تاريخ الجرد"])
-        diffs = (db.session.query(InventoryCountLine)
-                 .join(InventoryCount)
-                 .filter(
-                     InventoryCountLine.actual_quantity.isnot(None),
-                     InventoryCountLine.actual_quantity != InventoryCountLine.system_quantity,
-                     InventoryCount.status == "completed"
-                 )
-                 .order_by(InventoryCount.completed_at.desc())
-                 .all())
-        for l in diffs:
+        for l in count_difference_lines():
             writer.writerow([
                 l.id,
                 l.item.name if l.item else "",
@@ -1773,77 +1647,40 @@ def export_csv():
                             f"{p['usage_pct']}%",p["status_label"]])
     elif rtype == "consumption":
         days = int(request.args.get("days",30))
-        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         limit = int(request.args.get("limit",50))
         writer.writerow(["الصنف","الكود","الكمية المستهلكة","القيمة","عدد الحركات","متوسط اليوم"])
-        rows = db.session.query(
-            StockMovement.item_id, Item.name, Item.code,
-            func.sum(StockMovement.quantity).label("total_qty"),
-            func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
-            func.count(StockMovement.id).label("mov_count")
-        ).join(Item, StockMovement.item_id == Item.id
-        ).filter(StockMovement.type.in_(["out","transfer","damage"]),
-                 StockMovement.created_at >= since
-        ).group_by(StockMovement.item_id
-        ).order_by(func.sum(StockMovement.quantity).desc()
-        ).limit(limit).all()
-        for r in rows:
-            writer.writerow([r[1],r[2],r[3],round(float(r[4] or 0),2),r[5],round(float(r[3])/max(days,1),2)])
+        for r in consumption_rows(days, limit):
+            writer.writerow([r.item_name, r.item_code, r.total_qty,
+                             round(float(r.total_value or 0),2), r.movements,
+                             round(float(r.total_qty)/max(days,1),2)])
     elif rtype == "fastslow":
         days = int(request.args.get("days",90))
-        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         limit = int(request.args.get("limit",50))
-        out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
-            StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
-        ).group_by(StockMovement.item_id).subquery()
-        items = db.session.query(Item.id, Item.name, Item.code, Item.unit,
-                                 func.coalesce(out_q.c.qty, 0).label("consumed"),
-                                 func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
-        ).outerjoin(out_q, Item.id == out_q.c.item_id
-        ).outerjoin(Stock, Stock.item_id == Item.id
-        ).group_by(Item.id).all()
         writer.writerow(["النوع","الصنف","الكمية المستهلكة","المخزون الحالي"])
-        fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
-        slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
-        for i in fast:
-            writer.writerow(["سريع الحركة",i[1],i[4],i[5]])
-        for i in slow:
-            writer.writerow(["بطيء الحركة",i[1],i[4],i[5]])
+        fast, slow = fast_slow_rows(days, limit)
+        for r in fast:
+            writer.writerow(["سريع الحركة", r.item_name, r.consumed, r.current_stock])
+        for r in slow:
+            writer.writerow(["بطيء الحركة", r.item_name, r.consumed, r.current_stock])
     elif rtype == "supplier_perf":
         writer.writerow(["المورد","أوامر الشراء","الإجمالي","الإستلامات","دقة التسليم","الجودة","المعدل"])
-        sp_rows = db.session.query(
-            Supplier.id, Supplier.name,
-            func.count(PurchaseOrder.id).label("po_count"),
-            func.sum(PurchaseOrder.total_amount).label("total_amount"),
-            func.count(GoodsReceipt.id).label("grn_count"),
-        ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
-        ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
-        ).group_by(Supplier.id).all()
-        evals = SupplierEvaluation.query.with_entities(
-            SupplierEvaluation.supplier_id,
-            func.avg(SupplierEvaluation.quality).label("avg_quality"),
-            func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
-        ).group_by(SupplierEvaluation.supplier_id).all()
-        eval_map = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1)} for e in evals}
+        sp_rows = supplier_performance_rows()
+        eval_map = supplier_evaluation_map()
         for r in sp_rows:
-            ev = eval_map.get(r[0],{})
+            ev = eval_map.get(r.supplier_id,{})
             avg = (ev.get("delivery",0) + ev.get("quality",0))/2
-            writer.writerow([r[1] or "", r[2] or 0, round(float(r[3] or 0),2),
-                           r[4] or 0, ev.get("delivery",0), ev.get("quality",0), round(avg,1)])
+            writer.writerow([r.supplier_name or "", r.po_count or 0,
+                           round(float(r.total_amount or 0),2), r.grn_count or 0,
+                           ev.get("delivery",0), ev.get("quality",0), round(avg,1)])
     elif rtype == "valuation":
         writer.writerow(["الصنف","الكود","الكمية الإجمالية","متوسط التكلفة","القيمة الإجمالية","عدد الطبقات"])
-        for it in Item.query.filter_by(is_active=True).order_by(Item.name).all():
-            v = InventoryLayer.get_valuation(it.id)
-            if v["total_qty"] > 0:
-                writer.writerow([it.name, it.code, v["total_qty"],
-                               round(v["avg_cost"],2) if v["avg_cost"] else 0,
-                               round(v["total_value"],2), v["layer_count"]])
+        for it, v in valuation_rows():
+            writer.writerow([it.name, it.code, v["total_qty"],
+                           round(v["avg_cost"],2) if v["avg_cost"] else 0,
+                           round(v["total_value"],2), v["layer_count"]])
     elif rtype == "audit":
         import csv as _csv
-        filters = {}
-        for k in ["user_id","action","resource","date_from","date_to","search"]:
-            v = request.args.get(k)
-            if v: filters[k] = v
+        filters = args_filters(*AUDIT_FILTER_KEYS)
         result = AuditService.get_logs(1, 99999, filters)
         writer.writerow(["#","التاريخ","المستخدم","الإجراء","العنصر","الوصف","IP","البيانات القديمة","البيانات الجديدة"])
         for l in (l.to_dict() for l in result["items"]):
@@ -1874,11 +1711,7 @@ def export_csv():
     else:
         return err("نوع تقرير غير معروف")
 
-    buf   = io.BytesIO(output.getvalue().encode("utf-8-sig"))
-    buf.seek(0)
-    fname = f"warehouse_{rtype}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    return send_file(buf, mimetype="text/csv;charset=utf-8",
-                     download_name=fname, as_attachment=True)
+    return csv_download(output, export_filename(f"warehouse_{rtype}", "csv"))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2018,16 +1851,7 @@ def export_pdf():
     elif rtype == "diffs":
         headers = ["#","Item","Code","Warehouse","System","Actual","Diff","Date"]
         data = []
-        diffs = (db.session.query(InventoryCountLine)
-                 .join(InventoryCount)
-                 .filter(
-                     InventoryCountLine.actual_quantity.isnot(None),
-                     InventoryCountLine.actual_quantity != InventoryCountLine.system_quantity,
-                     InventoryCount.status == "completed"
-                 )
-                 .order_by(InventoryCount.completed_at.desc())
-                 .all())
-        for l in diffs:
+        for l in count_difference_lines():
             data.append([
                 str(l.id),
                 l.item.name[:18] if l.item else "",
@@ -2073,25 +1897,14 @@ def export_pdf():
 
     elif rtype == "consumption":
         days = int(request.args.get("days",30))
-        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         limit = int(request.args.get("limit",50))
         headers = ["Item","Code","Qty Consumed","Value","Movements","Avg/Day"]
         data = []
-        rows = db.session.query(
-            StockMovement.item_id, Item.name, Item.code,
-            func.sum(StockMovement.quantity).label("total_qty"),
-            func.sum(StockMovement.quantity * StockMovement.unit_price).label("total_val"),
-            func.count(StockMovement.id).label("mov_count")
-        ).join(Item, StockMovement.item_id == Item.id
-        ).filter(StockMovement.type.in_(["out","transfer","damage"]),
-                 StockMovement.created_at >= since
-        ).group_by(StockMovement.item_id
-        ).order_by(func.sum(StockMovement.quantity).desc()
-        ).limit(limit).all()
+        rows = consumption_rows(days, limit)
         for r in rows:
-            data.append([r[1][:22], r[2], str(int(r[3])),
-                        f"{round(float(r[4] or 0),2):,.2f}",
-                        str(r[5]), f"{round(float(r[3])/max(days,1),2):,.2f}"])
+            data.append([r.item_name[:22], r.item_code, str(int(r.total_qty)),
+                        f"{round(float(r.total_value or 0),2):,.2f}",
+                        str(r.movements), f"{round(float(r.total_qty)/max(days,1),2):,.2f}"])
         col_w = [4.5*cm, 2.5*cm, 2.5*cm, 3*cm, 2.5*cm, 2.5*cm]
         doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
                                  rightMargin=1.5*cm, leftMargin=1.5*cm,
@@ -2100,31 +1913,20 @@ def export_pdf():
         elements.append(Spacer(1, 0.3*cm))
         elements.append(make_table(data, headers, col_w))
         elements.append(Spacer(1,0.3*cm))
-        total_q = sum(float(r[3]) for r in rows) if rows else 0
+        total_q = sum(float(r.total_qty) for r in rows)
         elements.append(Paragraph(f"Total Items: {len(data)} | Total Consumed: {int(total_q)} units", f_style))
 
     elif rtype == "fastslow":
         days = int(request.args.get("days",90))
-        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         limit = int(request.args.get("limit",50))
         headers = ["Type","Item","Consumed","Current Stock"]
         data = []
-        out_q = db.session.query(StockMovement.item_id, func.sum(StockMovement.quantity).label("qty")).filter(
-            StockMovement.type.in_(["out","transfer","damage"]), StockMovement.created_at >= since
-        ).group_by(StockMovement.item_id).subquery()
-        items = db.session.query(Item.id, Item.name, Item.code,
-                                 func.coalesce(out_q.c.qty, 0).label("consumed"),
-                                 func.coalesce(func.sum(Stock.quantity), 0).label("current_stock")
-        ).outerjoin(out_q, Item.id == out_q.c.item_id
-        ).outerjoin(Stock, Stock.item_id == Item.id
-        ).group_by(Item.id).all()
-        fast = sorted(items, key=lambda x: float(x.consumed or 0), reverse=True)[:limit]
-        slow = sorted([it for it in items if float(it.consumed or 0) <= 0], key=lambda x: float(x.current_stock or 0), reverse=True)[:limit]
-        for i in fast:
-            data.append(["Fast", i[2], str(int(i[3])), str(int(i[4]))])
+        fast, slow = fast_slow_rows(days, limit)
+        for r in fast:
+            data.append(["Fast", r.item_code, str(int(r.consumed)), str(int(r.current_stock))])
         data.append(["—","—","—","—"])
-        for i in slow:
-            data.append(["Slow", i[2], str(int(i[3])), str(int(i[4]))])
+        for r in slow:
+            data.append(["Slow", r.item_code, str(int(r.consumed)), str(int(r.current_stock))])
         col_w = [2*cm, 4.5*cm, 3*cm, 3*cm]
         doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
                                  rightMargin=1.5*cm, leftMargin=1.5*cm,
@@ -2136,25 +1938,13 @@ def export_pdf():
     elif rtype == "supplier_perf":
         headers = ["Supplier","PO Count","Total Amount","GRN Count","Delivery","Quality","Avg Rating"]
         data = []
-        sp_rows = db.session.query(
-            Supplier.id, Supplier.name,
-            func.count(PurchaseOrder.id).label("po_count"),
-            func.sum(PurchaseOrder.total_amount).label("total_amount"),
-            func.count(GoodsReceipt.id).label("grn_count"),
-        ).outerjoin(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id
-        ).outerjoin(GoodsReceipt, GoodsReceipt.po_id == PurchaseOrder.id
-        ).group_by(Supplier.id).all()
-        sp_evals = SupplierEvaluation.query.with_entities(
-            SupplierEvaluation.supplier_id,
-            func.avg(SupplierEvaluation.quality).label("avg_quality"),
-            func.avg(SupplierEvaluation.delivery).label("avg_delivery"),
-        ).group_by(SupplierEvaluation.supplier_id).all()
-        sp_emap = {e[0]:{"quality":round(float(e[1] or 0),1),"delivery":round(float(e[2] or 0),1)} for e in sp_evals}
+        sp_rows = supplier_performance_rows()
+        sp_emap = supplier_evaluation_map()
         for r in sp_rows:
-            ev = sp_emap.get(r[0],{})
+            ev = sp_emap.get(r.supplier_id,{})
             avg = (ev.get("delivery",0) + ev.get("quality",0))/2
-            data.append([(r[1] or "")[:20], str(r[2] or 0),
-                        f"{round(float(r[3] or 0),2):,.2f}", str(r[4] or 0),
+            data.append([(r.supplier_name or "")[:20], str(r.po_count or 0),
+                        f"{round(float(r.total_amount or 0),2):,.2f}", str(r.grn_count or 0),
                         str(ev.get("delivery",0)), str(ev.get("quality",0)),
                         f"{round(avg,1)}"])
         col_w = [4*cm, 2.5*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm]
@@ -2168,12 +1958,11 @@ def export_pdf():
     elif rtype == "valuation":
         headers = ["Item","Code","Total Qty","Avg Cost","Total Value","Layers"]
         data = []
-        for it in Item.query.filter_by(is_active=True).order_by(Item.name).all():
-            v = InventoryLayer.get_valuation(it.id)
-            if v["total_qty"] > 0:
-                data.append([it.name[:22], it.code, str(v["total_qty"]),
-                           f"{round(v['avg_cost'],2):,.2f}" if v['avg_cost'] else "0",
-                           f"{round(v['total_value'],2):,.2f}", str(v["layer_count"])])
+        rows = valuation_rows()
+        for it, v in rows:
+            data.append([it.name[:22], it.code, str(v["total_qty"]),
+                       f"{round(v['avg_cost'],2):,.2f}" if v['avg_cost'] else "0",
+                       f"{round(v['total_value'],2):,.2f}", str(v["layer_count"])])
         col_w = [4.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3*cm, 2*cm]
         doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
                                  rightMargin=1.5*cm, leftMargin=1.5*cm,
@@ -2181,17 +1970,14 @@ def export_pdf():
         elements.append(Paragraph(f"FIFO Inventory Valuation — {now_str}", t_style))
         elements.append(Spacer(1, 0.3*cm))
         elements.append(make_table(data, headers, col_w))
-        grand_v = sum(v["total_value"] for v in [InventoryLayer.get_valuation(it.id) for it in Item.query.filter_by(is_active=True).all()] if v["total_qty"] > 0)
+        grand_v = sum(v["total_value"] for _, v in rows)
         elements.append(Spacer(1,0.3*cm))
         elements.append(Paragraph(f"Total Items: {len(data)} | Grand Total Value: {grand_v:,.2f} SAR", f_style))
 
     elif rtype == "audit":
         headers = ["#","Date","User","Action","Resource","Description","IP"]
         data = []
-        filters = {}
-        for k in ["user_id","action","resource","date_from","date_to","search"]:
-            v = request.args.get(k)
-            if v: filters[k] = v
+        filters = args_filters(*AUDIT_FILTER_KEYS)
         result = AuditService.get_logs(1, 5000, filters)
         for l in result["items"]:
             data.append([
@@ -2266,9 +2052,7 @@ def export_pdf():
 
     doc.build(elements)
     buf.seek(0)
-    fname = f"warehouse_{rtype}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    return send_file(buf, mimetype="application/pdf",
-                     download_name=fname, as_attachment=True)
+    return pdf_download(buf, export_filename(f"warehouse_{rtype}", "pdf"))
 
 # ══════════════════════════════════════════════════════════════
 #  FILE UPLOAD
@@ -2276,24 +2060,15 @@ def export_pdf():
 @api.route("/upload", methods=["POST"])
 @jwt_required()
 def upload_file():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     item_id = request.form.get("item_id", type=int)
     if not item_id: return err("معرف الصنف مطلوب")
     item = Item.query.get_or_404(item_id)
     f = request.files.get("file")
-    if not f: return err("الملف مطلوب")
-    ext = f.filename.rsplit(".",1)[-1].lower() if "." in f.filename else ""
-    if ext not in ALLOWED_EXTENSIONS:
-        return err("نوع الملف غير مسموح: يرجى رفع PDF, صور, مستندات Office أو CSV/ZIP فقط")
-    f.seek(0, os.SEEK_END)
-    fsize = f.tell()
-    f.seek(0)
-    if fsize > MAX_FILE_SIZE:
-        return err("حجم الملف يتجاوز 16 ميجابايت")
-    ts  = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = f"item_{item_id}_{ts}_{secure_filename(f.filename)}"
-    folder = os.path.join(current_app.root_path, "..", "uploads")
-    os.makedirs(folder, exist_ok=True)
+    error = validate_upload(f, type_message=ATTACHMENT_TYPE_ERROR)
+    if error: return err(error)
+    safe_name = unique_filename(f"item_{item_id}", f.filename)
+    folder = uploads_dir()
     f.save(os.path.join(folder, safe_name))
     mime_type = mimetypes.guess_type(f.filename)[0] or "application/octet-stream"
     attach = ItemAttachment(
@@ -2315,8 +2090,7 @@ def get_item_attachments(iid):
 @api.route("/uploads/<path:filename>", methods=["GET"])
 @jwt_required()
 def serve_upload(filename):
-    folder = os.path.join(current_app.root_path, "..", "uploads")
-    return send_from_directory(folder, filename)
+    return send_from_directory(uploads_dir(), filename)
 
 # ══════════════════════════════════════════════════════════════
 #  NOTIFICATION SETTINGS
@@ -2324,8 +2098,7 @@ def serve_upload(filename):
 @api.route("/settings/notifications", methods=["GET"])
 @jwt_required()
 def get_notif_settings():
-    configs = NotificationConfig.query.all()
-    d = {c.key: c.value for c in configs}
+    d = config_map(NotificationConfig)
     return ok({
         "whatsapp_enabled": d.get("whatsapp_enabled","false"),
         "whatsapp_number": d.get("whatsapp_number",""),
@@ -2346,16 +2119,7 @@ def get_notif_settings():
 @require_role("admin","manager")
 def save_notif_settings():
     data = request.get_json() or {}
-    for key in ["whatsapp_enabled","whatsapp_number","whatsapp_cloud_api","whatsapp_token","whatsapp_phone_id",
-                "email_enabled","smtp_host","smtp_port","smtp_user","smtp_pass",
-                "email_from","notify_low_stock","notify_transfer"]:
-        if key in data:
-            c = NotificationConfig.query.filter_by(key=key).first()
-            if not c:
-                c = NotificationConfig(key=key, value=str(data[key]))
-                db.session.add(c)
-            else:
-                c.value = str(data[key])
+    config_save(NotificationConfig, data, NOTIF_SETTING_KEYS)
     db.session.commit()
     return ok(message="تم حفظ إعدادات الإشعارات")
 
@@ -2366,22 +2130,10 @@ def test_email():
     to = data.get("to","")
     if not to: return err("البريد المستلم مطلوب")
     try:
-        host = NotificationConfig.query.filter_by(key="smtp_host").first()
-        port = NotificationConfig.query.filter_by(key="smtp_port").first()
-        user = NotificationConfig.query.filter_by(key="smtp_user").first()
-        pwd  = NotificationConfig.query.filter_by(key="smtp_pass").first()
-        frm  = NotificationConfig.query.filter_by(key="email_from").first()
-        if not host or not host.value: return err("SMTP غير مهيأ")
-        msg = MIMEMultipart()
-        msg["From"] = frm.value if frm else user.value if user else "noreply@wms.local"
-        msg["To"] = to
-        msg["Subject"] = "🧪 اختبار إعدادات البريد - نظام إدارة المخازن"
-        msg.attach(MIMEText("تم إعداد البريد الإلكتروني بنجاح ✅\n\nنظام إدارة المخازن", "plain", "utf-8"))
-        with smtplib.SMTP(host.value, int(port.value if port else 587), timeout=10) as s:
-            s.starttls()
-            if user and user.value and pwd and pwd.value:
-                s.login(user.value, pwd.value)
-            s.send_message(msg)
+        cfg = smtp_settings()
+        if not cfg["host"]: return err("SMTP غير مهيأ")
+        send_email("🧪 اختبار إعدادات البريد - نظام إدارة المخازن",
+                   "تم إعداد البريد الإلكتروني بنجاح ✅\n\nنظام إدارة المخازن", [to], cfg)
         return ok(message="✅ تم إرسال بريد الاختبار بنجاح")
     except Exception as e:
         return err(f"❌ فشل الإرسال: {str(e)[:100]}")
@@ -2406,8 +2158,7 @@ def test_whatsapp():
 @api.route("/settings/backup", methods=["GET"])
 @jwt_required()
 def get_backup_settings():
-    configs = BackupConfig.query.all()
-    d = {c.key: c.value for c in configs}
+    d = config_map(BackupConfig)
     return ok({
         "auto_backup_enabled": d.get("auto_backup_enabled","false"),
         "backup_interval_hours": d.get("backup_interval_hours","24"),
@@ -2419,14 +2170,7 @@ def get_backup_settings():
 @require_role("admin")
 def save_backup_settings():
     data = request.get_json() or {}
-    for key in ["auto_backup_enabled","backup_interval_hours","backup_keep_count","last_backup"]:
-        if key in data:
-            c = BackupConfig.query.filter_by(key=key).first()
-            if not c:
-                c = BackupConfig(key=key, value=str(data[key]))
-                db.session.add(c)
-            else:
-                c.value = str(data[key])
+    config_save(BackupConfig, data, BACKUP_SETTING_KEYS)
     db.session.commit()
     return ok(message="تم حفظ إعدادات النسخ الاحتياطي")
 
@@ -2434,61 +2178,29 @@ def save_backup_settings():
 @require_role("admin")
 def trigger_backup():
     try:
-        db_path = current_app.config.get("SQLALCHEMY_DATABASE_URI","").replace("sqlite:///","")
-        if not os.path.isabs(db_path):
-            db_path = os.path.join(current_app.root_path, "..", db_path)
-        if not os.path.exists(db_path): return err("قاعدة البيانات غير موجودة")
-        backup_dir = os.path.join(current_app.root_path, "..", "backups")
-        os.makedirs(backup_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"wms_backup_{ts}.db"
-        import shutil
-        shutil.copy2(db_path, os.path.join(backup_dir, backup_name))
-        keep = int((BackupConfig.query.filter_by(key="backup_keep_count").first() or BackupConfig(key="backup_keep_count",value="10")).value)
-        all_backups = sorted([f for f in os.listdir(backup_dir) if f.startswith("wms_backup_")], reverse=True)
-        for old in all_backups[keep:]:
-            try: os.remove(os.path.join(backup_dir, old))
-            except: pass
-        c = BackupConfig.query.filter_by(key="last_backup").first()
-        if not c:
-            c = BackupConfig(key="last_backup", value=ts)
-            db.session.add(c)
-        else:
-            c.value = ts
+        backup_name = backup_service.create_backup()
         AuditService.log("backup","system",desc=f"نسخة احتياطية: {backup_name}")
         db.session.commit()
         return ok({"filename":backup_name}, message=f"✅ تم إنشاء النسخة الاحتياطية {backup_name}")
+    except FileNotFoundError as e:
+        return err(str(e))
     except Exception as e:
         return err(f"❌ فشل النسخ الاحتياطي: {str(e)[:200]}")
 
 @api.route("/backups", methods=["GET"])
 @require_role("admin")
 def list_backups():
-    backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
-    os.makedirs(backup_dir, exist_ok=True)
-    files = []
-    for f in sorted(os.listdir(backup_dir), reverse=True):
-        fp = os.path.join(backup_dir, f)
-        if os.path.isfile(fp):
-            sz = os.path.getsize(fp)
-            files.append({"name":f,"size":sz,
-                "size_label":f"{sz/1024/1024:.1f} MB" if sz>1024*1024 else f"{sz/1024:.0f} KB",
-                "created":datetime.datetime.fromtimestamp(os.path.getmtime(fp)).isoformat()})
-    return ok(files)
+    return ok(backup_service.list_backups())
 
 @api.route("/backups/<path:name>", methods=["GET"])
 @require_role("admin")
 def download_backup(name):
-    backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
-    return send_from_directory(backup_dir, name, as_attachment=True)
+    return send_from_directory(backups_dir(), name, as_attachment=True)
 
 @api.route("/settings/auto-reorder", methods=["GET"])
 @require_role("admin","manager")
 def get_auto_reorder_settings():
-    cfg = {}
-    for key in ["auto_reorder_enabled","auto_reorder_supplier_id","auto_reorder_warehouse_id"]:
-        c = BackupConfig.query.filter_by(key=key).first()
-        cfg[key] = c.value if c else ""
+    cfg = {key: config_get(BackupConfig, key) for key in AUTO_REORDER_KEYS}
     suppliers = [{"id":s.id,"name":s.name} for s in Supplier.query.filter_by(is_active=True).all()]
     warehouses = [{"id":w.id,"name":w.name} for w in Warehouse.query.filter_by(is_active=True).all()]
     return ok({"config": cfg, "suppliers": suppliers, "warehouses": warehouses})
@@ -2497,14 +2209,7 @@ def get_auto_reorder_settings():
 @require_role("admin","manager")
 def update_auto_reorder_settings():
     data = request.get_json() or {}
-    for key in ["auto_reorder_enabled","auto_reorder_supplier_id","auto_reorder_warehouse_id"]:
-        if key in data:
-            c = BackupConfig.query.filter_by(key=key).first()
-            if not c:
-                c = BackupConfig(key=key, value=str(data[key]))
-                db.session.add(c)
-            else:
-                c.value = str(data[key])
+    config_save(BackupConfig, data, AUTO_REORDER_KEYS)
     db.session.commit()
     return ok(message="✅ تم حفظ إعدادات التوريد التلقائي")
 
@@ -2534,12 +2239,10 @@ def restore_backup():
     data = request.get_json() or {}
     name = data.get("name","")
     if not name: return err("يجب تحديد اسم ملف الاستعادة")
-    backup_dir = os.path.join(os.path.dirname(current_app.root_path), "backups")
-    backup_path = os.path.join(backup_dir, name)
+    backup_path = os.path.join(backups_dir(), name)
     if not os.path.isfile(backup_path): return err("ملف الاستعادة غير موجود")
-    db_path = current_app.config.get("SQLALCHEMY_DATABASE_URI","").replace("sqlite:///","")
+    db_path = db_file_path()
     if not db_path: return err("غير مدعوم لقواعد البيانات غير SQLite")
-    db_path = os.path.join(os.path.dirname(current_app.root_path), db_path)
     try:
         import shutil
         shutil.copy2(backup_path, db_path)
@@ -2597,8 +2300,7 @@ def get_pr(pid):
 def update_pr(pid):
     pr = PurchaseRequest.query.get_or_404(pid)
     data = request.get_json() or {}
-    for f in ("department","priority","notes"):
-        if f in data: setattr(pr, f, data[f])
+    apply_fields(pr, data, ["department","priority","notes"])
     if "project_id" in data: pr.project_id = int(data["project_id"]) if data["project_id"] else None
     if "required_date" in data: pr.required_date = parse_date(data["required_date"])
     if "items" in data:
@@ -2734,8 +2436,7 @@ def get_rfq(rid):
 def update_rfq(rid):
     rfq = RFQ.query.get_or_404(rid)
     data = request.get_json() or {}
-    for f in ("delivery_terms","payment_terms","warranty","notes","status"):
-        if f in data: setattr(rfq, f, data[f])
+    apply_fields(rfq, data, ["delivery_terms","payment_terms","warranty","notes","status"])
     if "valid_until" in data: rfq.valid_until = parse_date(data["valid_until"])
     if "supplier_ids" in data:
         RFQSupplier.query.filter_by(rfq_id=rid).delete(); db.session.flush()
@@ -2806,8 +2507,7 @@ def get_quotation(qid):
 def update_quotation(qid):
     qt = Quotation.query.get_or_404(qid)
     data = request.get_json() or {}
-    for f in ("amount","vat","delivery_cost","delivery_days","warranty_period","notes","status"):
-        if f in data: setattr(qt, f, data[f])
+    apply_fields(qt, data, ["amount","vat","delivery_cost","delivery_days","warranty_period","notes","status"])
     qt.total = (qt.amount or 0) + (qt.vat or 0) + (qt.delivery_cost or 0)
     if "items" in data:
         QuotationItem.query.filter_by(quotation_id=qid).delete(); db.session.flush()
@@ -2904,8 +2604,7 @@ def get_po(pid):
 def update_po(pid):
     po = PurchaseOrder.query.get_or_404(pid)
     data = request.get_json() or {}
-    for f in ("currency","payment_terms","notes","status"):
-        if f in data: setattr(po, f, data[f])
+    apply_fields(po, data, ["currency","payment_terms","notes","status"])
     if "warehouse_id" in data: po.warehouse_id = int(data["warehouse_id"])
     if "delivery_date" in data: po.delivery_date = parse_date(data["delivery_date"])
     if "items" in data:
@@ -2923,7 +2622,7 @@ def update_po(pid):
 def approve_po(pid):
     po = PurchaseOrder.query.get_or_404(pid)
     if po.status != "draft": return err("يمكن اعتماد المسودات فقط")
-    is_ok, msg, final = _process_chain_approval(po, int(get_jwt_identity()), "po")
+    is_ok, msg, final = _process_chain_approval(po, current_uid(), "po")
     if not is_ok: return err(msg)
     if final in ("step", "step_same"):
         db.session.commit()
@@ -3056,7 +2755,7 @@ def create_grn():
     AuditService.log("create","goods_receipt",grn.id,f"إنشاء إذن استلام: {ref}")
     db.session.commit()
     sup = Supplier.query.get(data.get("supplier_id"))
-    send_notif_email(f"📥 إذن استلام جديد: {ref}",
+    send_notification_email(f"📥 إذن استلام جديد: {ref}",
         f"تم إستلام بضاعة:\nالمرجع: {ref}\nالمورد: {sup.name if sup else '—'}\n"
         f"إجمالي القيمة: {total_value:,.2f} ر.س\nالمستلم: {_uname(g.current_user.id)}")
     return created(grn.to_dict())
@@ -3222,8 +2921,7 @@ def update_supplier_profile(sid):
         profile = SupplierProfile(supplier_id=sid)
         db.session.add(profile)
     data = request.get_json() or {}
-    for f in ("contact_person","commercial_register","website"):
-        if f in data: setattr(profile, f, data[f])
+    apply_fields(profile, data, ["contact_person","commercial_register","website"])
     AuditService.log("edit","supplier_profile",sid,f"تحديث بيانات مورد")
     db.session.commit()
     return ok(profile.to_dict())
@@ -3355,8 +3053,7 @@ def update_sale(sid):
     sale = SaleOrder.query.get_or_404(sid)
     if sale.status not in ("pending",): return err("يمكن تعديل الطلبات المعلقة فقط")
     data = request.get_json() or {}
-    for f in ("customer_name","customer_phone","customer_email","notes"):
-        if f in data: setattr(sale, f, data[f])
+    apply_fields(sale, data, ["customer_name","customer_phone","customer_email","notes"])
     if "discount_pct" in data: sale.discount_pct = float(data["discount_pct"])
     if "tax_pct" in data: sale.tax_pct = float(data["tax_pct"])
     if "warehouse_id" in data: sale.warehouse_id = int(data["warehouse_id"])
@@ -3466,8 +3163,7 @@ def sale_invoice(sid):
     ]))
     elems.append(tt)
     doc.build(elems); buf.seek(0)
-    return send_file(buf, mimetype="application/pdf",
-                     download_name=f"sale_{sale.ref_number}.pdf", as_attachment=True)
+    return pdf_download(buf, f"sale_{sale.ref_number}.pdf")
 
 @api.route("/sales/<int:sid>/cancel", methods=["POST"])
 @require_role("admin","manager")
@@ -3514,7 +3210,7 @@ def supplier_login():
     return ok({"access_token": access_token, "user": {"id": user.id, "name": user.name, "username": user.username, "supplier_id": user.supplier_id, "supplier_name": supplier.name}})
 
 def _supplier_required():
-    uid = int(get_jwt_identity())
+    uid = current_uid()
     user = User.query.get(uid)
     if not user or not user.supplier_id: return None
     return user
@@ -3537,8 +3233,7 @@ def supplier_update_profile():
     s = Supplier.query.get(user.supplier_id)
     if not s: return err("المورد غير موجود")
     data = request.get_json() or {}
-    for f in ["phone", "email", "address", "tax_number", "payment_terms"]:
-        if f in data: setattr(s, f, data[f])
+    apply_fields(s, data, ["phone", "email", "address", "tax_number", "payment_terms"])
     db.session.commit()
     return ok(message="✅ تم تحديث البيانات")
 
@@ -3603,12 +3298,9 @@ def supplier_upload_doc():
     if "file" not in request.files: return err("اختر ملفاً")
     f = request.files["file"]
     if f.filename == "": return err("اسم الملف فارغ")
-    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
-    if ext not in current_app.config.get("ALLOWED_EXTENSIONS", {"pdf","jpg","jpeg","png","doc","docx"}): return err("نوع الملف غير مسموح")
-    filename = secure_filename(f"supplier_{user.supplier_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{f.filename}")
-    upload_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads", "documents")
-    os.makedirs(upload_dir, exist_ok=True)
-    f.save(os.path.join(upload_dir, filename))
+    if file_ext(f) not in current_app.config.get("ALLOWED_EXTENSIONS", {"pdf","jpg","jpeg","png","doc","docx"}): return err("نوع الملف غير مسموح")
+    filename = unique_filename(f"supplier_{user.supplier_id}", f.filename)
+    f.save(os.path.join(uploads_dir("documents"), filename))
     AuditService.log("upload", "supplier_document", user.supplier_id, f"مستند: {f.filename}")
     return ok({"filename": filename}, message="✅ تم رفع المستند")
 
