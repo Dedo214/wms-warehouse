@@ -1177,6 +1177,7 @@ class ReportService:
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
             data = ReportService.budget()
+            ri = 2
             for ri, p in enumerate(data["projects"], 3):
                 rd = [p["name"],p["code"],p["client"],p["budget"],p["spent"],p["remaining"],
                       p["usage_pct"],p["status_label"]]
@@ -1226,7 +1227,7 @@ class ReportService:
                 style_row(ri, len(headers), alt=ri%2==0)
 
         elif report_type == "fastslow":
-            ws.title = "ط³ط±ظٹط¹/ط¨ط·ظٹط،"
+            ws.title = "ط³ط±ظٹط¹-ط¨ط·ظٹط،"
             ws.merge_cells("A1:D1")
             ws["A1"] = f"ط§ظ„ط£طµظ†ط§ظپ ط³ط±ظٹط¹ط©/ط¨ط·ظٹط¦ط© ط§ظ„ط­ط±ظƒط© â€” {datetime.datetime.now().strftime('%d/%m/%Y')}"
             ws["A1"].font = Font(bold=True, size=14, color="1B4F72")
@@ -1312,7 +1313,7 @@ class ReportService:
                 if v["total_qty"] > 0:
                     rd = [it.name, it.code, v["total_qty"],
                           round(v["avg_cost"],2) if v["avg_cost"] else 0,
-                          round(v["total_value"],2), v["layer_count"]]
+                          round(v["total_value"],2), len(v["layers"])]
                     for col, val in enumerate(rd, 1):
                         ws.cell(row=ri, column=col, value=val)
                     style_row(ri, len(headers), alt=ri%2==0); ri += 1
@@ -1330,11 +1331,12 @@ class ReportService:
                 ws.cell(row=2, column=col, value=h)
             style_header(2, len(headers))
             result = AuditService.get_logs(1, 5000, {})
-            for ri, l in enumerate(result["items"], 3):
-                rd = [l.id, l.created_date, l.user_name, l.action,
-                      f"{l.resource}#{l.resource_id}" if l.resource_id else l.resource,
-                      l.description or "", l.ip_address or "",
-                      l.old_data or "", l.new_data or ""]
+            for ri, log in enumerate(result["items"], 3):
+                l = log.to_dict()
+                rd = [l["id"], l["created_date"], l["user_name"], l["action"],
+                      f'{l["resource"]}#{l["resource_id"]}' if l["resource_id"] else l["resource"],
+                      l["description"] or "", l["ip_address"] or "",
+                      l["old_data"] or "", l["new_data"] or ""]
                 for col, val in enumerate(rd, 1):
                     ws.cell(row=ri, column=col, value=val)
                 style_row(ri, len(headers), alt=ri%2==0)
