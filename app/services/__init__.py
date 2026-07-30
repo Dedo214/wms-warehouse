@@ -2,7 +2,7 @@
 ط·ط¨ظ‚ط© ط§ظ„ط®ط¯ظ…ط§طھ â€” Business Logic Services
 ظƒظ„ ط§ظ„ظ…ظ†ط·ظ‚ ط§ظ„طھط¬ط§ط±ظٹ ظ…ط¹ط²ظˆظ„ ظ‡ظ†ط§ ط¨ط¹ظٹط¯ط§ظ‹ ط¹ظ† ط§ظ„ظ€ routes
 """
-import datetime, json
+import datetime, json, logging
 from sqlalchemy import func, cast, Date
 from sqlalchemy.orm import joinedload
 from flask import request, current_app
@@ -19,6 +19,8 @@ from app.models import (db, User, Warehouse, Category, Supplier, Item,
                          ApprovalChain)
 from app.utils import gen_ref, paginate, parse_date
 
+logger = logging.getLogger(__name__)
+
 # â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
 #  AUDIT SERVICE
 # â•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گâ•گ
@@ -31,7 +33,7 @@ class AuditService:
                 verify_jwt_in_request(optional=True)
                 uid = get_jwt_identity()
             except Exception:
-                pass
+                uid = None
             entry = AuditLog(
                 user_id     = uid,
                 action      = action,
@@ -45,7 +47,8 @@ class AuditService:
             )
             db.session.add(entry)
         except Exception:
-            pass  # never crash on audit
+            # never crash the request on audit logging, but do not swallow silently
+            logger.exception("Failed to write audit log entry")
 
     @staticmethod
     def get_logs(page=1, per_page=50, filters=None):
@@ -87,7 +90,7 @@ class NotificationService:
             for uid in user_ids:
                 sio.emit("notification_update", {"unread": 1}, to=f"user_{uid}")
         except Exception:
-            pass
+            logger.warning("Failed to emit realtime notification update", exc_info=True)
 
     @staticmethod
     def check_low_stock(item_id):
@@ -972,13 +975,13 @@ class ReportService:
                 d = dt.datetime.strptime(date_from, "%Y-%m-%d").date()
                 q = q.filter(func.date(Transfer.created_at) >= d)
             except ValueError:
-                pass
+                logger.warning(f"Ignoring invalid date_from filter for transfers report: {date_from!r}")
         if date_to:
             try:
                 d2 = dt.datetime.strptime(date_to, "%Y-%m-%d").date()
                 q = q.filter(func.date(Transfer.created_at) <= d2)
             except ValueError:
-                pass
+                logger.warning(f"Ignoring invalid date_to filter for transfers report: {date_to!r}")
         ts = q.order_by(Transfer.created_at.desc()).all()
         pending  = sum(1 for t in ts if t.status=="pending")
         executed = sum(1 for t in ts if t.status=="executed")

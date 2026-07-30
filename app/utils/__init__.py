@@ -40,7 +40,7 @@ def gen_ref(prefix):
 def parse_date(s):
     if not s: return None
     try: return datetime.datetime.strptime(s, "%Y-%m-%d")
-    except: return None
+    except (ValueError, TypeError): return None
 
 def today_str():
     return datetime.datetime.utcnow().strftime("%Y-%m-%d")

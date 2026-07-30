@@ -2,7 +2,7 @@
 جميع مسارات الـ API — All API Routes
 Blueprint واحد يجمع كل المسارات
 """
-import datetime, io, json, os, smtplib, mimetypes, urllib.parse
+import datetime, io, json, os, smtplib, mimetypes, urllib.parse, logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, send_file, g, current_app, send_from_directory
@@ -29,6 +29,8 @@ from app.models import (
     Lot, UnitConversion, ApprovalChain, ApprovalStep, ScheduledCount,
 )
 
+logger = logging.getLogger(__name__)
+
 def send_notif_email(subject, body, to=None):
     try:
         host = NotificationConfig.query.filter_by(key="smtp_host").first()
@@ -49,8 +51,10 @@ def send_notif_email(subject, body, to=None):
                     s.starttls()
                     if user and user.value and pwd and pwd.value: s.login(user.value, pwd.value)
                     s.send_message(msg)
-            except: pass
-    except: pass
+            except Exception as e:
+                logger.warning(f"Failed to send notification email to {r}: {e}")
+    except Exception as e:
+        logger.warning(f"Notification email setup failed: {e}")
 
 def _uname(uid): u = User.query.get(uid); return u.name if u else "—"
 
@@ -416,7 +420,8 @@ def item_barcode_label(iid):
     doc.build(elems); buf.seek(0)
     if tmp and os.path.isfile(tmp):
         try: os.remove(tmp)
-        except: pass
+        except OSError as e:
+            logger.warning(f"Could not remove temp barcode file {tmp}: {e}")
     return send_file(buf, mimetype="application/pdf",
                      download_name=f"{item.code}_label.pdf")
 
@@ -2448,7 +2453,8 @@ def trigger_backup():
         all_backups = sorted([f for f in os.listdir(backup_dir) if f.startswith("wms_backup_")], reverse=True)
         for old in all_backups[keep:]:
             try: os.remove(os.path.join(backup_dir, old))
-            except: pass
+            except OSError as e:
+                logger.warning(f"Could not remove old backup {old}: {e}")
         c = BackupConfig.query.filter_by(key="last_backup").first()
         if not c:
             c = BackupConfig(key="last_backup", value=ts)
@@ -3031,8 +3037,10 @@ def create_grn():
                 MovementService.create({"item_id":item_id,"warehouse_id":grn.warehouse_id,
                     "quantity":accepted,"type":"in","reference":ref,"unit_price":unit_price,
                     "notes":f"GRN: {ref}"}, g.current_user.id)
-            except Exception:
-                pass  # non-blocking
+            except Exception as e:
+                # non-blocking: stock is still updated below, but the audit
+                # movement record failed — surface it so it can be reconciled.
+                logger.warning(f"GRN {ref}: failed to record stock movement for item {item_id}: {e}")
         # update stock for accepted items
         if accepted > 0 and grn.warehouse_id and item_id:
             stk = Stock.query.filter_by(item_id=item_id, warehouse_id=grn.warehouse_id).first()
