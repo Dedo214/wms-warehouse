@@ -1,5 +1,5 @@
 """Flask Application Factory"""
-import os, socket, datetime, shutil
+import os, socket, datetime
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
@@ -155,24 +155,10 @@ def _init_scheduler(app):
         def auto_backup_job():
             with app.app_context():
                 try:
-                    enabled = BackupConfig.query.filter_by(key="auto_backup_enabled").first()
-                    if not enabled or enabled.value != "true": return
-                    db_path = app.config.get("SQLALCHEMY_DATABASE_URI","").replace("sqlite:///","")
-                    if not os.path.isabs(db_path):
-                        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",db_path)
-                    if not os.path.exists(db_path): return
-                    backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),"..","backups")
-                    os.makedirs(backup_dir, exist_ok=True)
-                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    backup_name = f"wms_auto_backup_{ts}.db"
-                    shutil.copy2(db_path, os.path.join(backup_dir, backup_name))
-                    keep = int((BackupConfig.query.filter_by(key="backup_keep_count").first() or BackupConfig(key="backup_keep_count",value="10")).value)
-                    all_b = sorted([f for f in os.listdir(backup_dir) if f.startswith("wms_auto_backup_")], reverse=True)
-                    for old in all_b[keep:]:
-                        try: os.remove(os.path.join(backup_dir,old))
-                        except: pass
-                    c = BackupConfig.query.filter_by(key="last_backup").first()
-                    if c: c.value = ts
+                    from app.services import backup as backup_service
+                    from app.utils import config_get
+                    if config_get(BackupConfig, "auto_backup_enabled") != "true": return
+                    backup_service.create_backup("wms_auto_backup_", app)
                     db.session.commit()
                 except: pass
         interval = int((app.config.get("BACKUP_INTERVAL_HOURS",24))) * 3600

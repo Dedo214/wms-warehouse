@@ -4,6 +4,16 @@ from functools import wraps
 from flask import jsonify, request, g
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
+from app.utils.barcodes import barcode_png, barcode_png_file
+from app.utils.configs import (config_map, config_get, config_get_int,
+                               config_set, config_save)
+from app.utils.exports import (csv_download, export_filename, pdf_download,
+                               rows_to_csv, rows_to_xlsx, xlsx_download)
+from app.utils.files import (ALLOWED_EXTENSIONS, IMAGE_EXTENSIONS,
+                             MAX_FILE_SIZE, MAX_IMAGE_SIZE, file_ext,
+                             file_size, unique_filename, validate_upload)
+from app.utils.paths import backups_dir, db_file_path, project_root, uploads_dir
+
 # ── Response helpers ─────────────────────────────────────────
 def ok(data=None, message="", code=200):
     return jsonify({"success":True,"message":message,"data":data}), code
@@ -53,8 +63,7 @@ def require_role(*roles):
             from app.models import User
             try: verify_jwt_in_request()
             except Exception: return unauthorized("توكن غير صالح أو منتهٍ")
-            uid = int(get_jwt_identity())
-            user = User.query.get(int(uid))
+            user = User.query.get(current_uid())
             if not user or not user.is_active:
                 return forbidden("الحساب غير مفعّل")
             if roles and user.role not in roles:
@@ -63,6 +72,33 @@ def require_role(*roles):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+# ── Current user ─────────────────────────────────────────────
+def current_uid():
+    return int(get_jwt_identity())
+
+def current_user():
+    """The User behind the request JWT (None when it no longer exists)."""
+    from app.models import User
+    user = getattr(g, "current_user", None)
+    if user is not None: return user
+    return User.query.get(current_uid())
+
+# ── Partial update ───────────────────────────────────────────
+def apply_fields(obj, data, fields, cast=None):
+    """Copy the given keys from `data` onto `obj` when present."""
+    for f in fields:
+        if f in data: setattr(obj, f, cast(data[f]) if cast else data[f])
+    return obj
+
+# ── Query-string filters ─────────────────────────────────────
+def args_filters(*keys):
+    """Non-empty request.args values for `keys`, as a filters dict."""
+    filters = {}
+    for k in keys:
+        v = request.args.get(k)
+        if v: filters[k] = v
+    return filters
 
 # ── Validate required fields ─────────────────────────────────
 def validate(data, fields):
