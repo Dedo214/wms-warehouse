@@ -37,12 +37,13 @@ def create_app(cfg=None):
 
     db.init_app(app)
     jwt = JWTManager(app)
-    CORS(app, resources={r"/api/*": {"origins":"*"}},
-         allow_headers=["Content-Type","Authorization"],
-         methods=["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-         supports_credentials=True)
+    cors_origins = app.config.get("CORS_ORIGINS", ["*"])
+    CORS(app, resources={r"/api/*": {"origins": cors_origins}},
+         allow_headers=app.config.get("CORS_HEADERS", ["Content-Type", "Authorization"]),
+         methods=app.config.get("CORS_METHODS", ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+         supports_credentials=app.config.get("CORS_SUPPORTS_CREDENTIALS", False))
 
-    socketio.init_app(app, cors_allowed_origins="*")
+    socketio.init_app(app, cors_allowed_origins=cors_origins)
 
     limiter.init_app(app)
 

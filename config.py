@@ -3,6 +3,7 @@
 Application Configuration for all environments
 """
 import os
+import secrets
 from datetime import timedelta
 from dotenv import load_dotenv
 
@@ -11,16 +12,33 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _get_secret(name: str) -> str:
+    """Return a secret from the environment.
+
+    In production the secret MUST be supplied via the environment; otherwise a
+    fresh random value is generated per process so development never relies on a
+    known, hardcoded key that could be used to forge sessions/JWTs.
+    """
+    val = os.environ.get(name)
+    if val:
+        return val
+    if os.environ.get("FLASK_ENV", "development").lower() == "production":
+        raise RuntimeError(
+            f"{name} must be set via the environment in production."
+        )
+    return secrets.token_urlsafe(48)
+
+
 class Config:
     """الإعدادات الأساسية المشتركة"""
 
     # ── App ───────────────────────────────────────────────
     APP_NAME    = "نظام إدارة المخازن"
     APP_VERSION = "2.0.0"
-    SECRET_KEY  = os.environ.get("SECRET_KEY", "dev-secret-key-min-32-chars-change-in-prod")
+    SECRET_KEY  = _get_secret("SECRET_KEY")
 
     # ── JWT ───────────────────────────────────────────────
-    JWT_SECRET_KEY              = os.environ.get("JWT_SECRET_KEY", "dev-jwt-secret-key-min-32-chars-prod")
+    JWT_SECRET_KEY              = _get_secret("JWT_SECRET_KEY")
     JWT_ACCESS_TOKEN_EXPIRES    = timedelta(hours=12)
     JWT_REFRESH_TOKEN_EXPIRES   = timedelta(days=30)
     JWT_ALGORITHM               = "HS256"
@@ -40,10 +58,14 @@ class Config:
     }
 
     # ── CORS ──────────────────────────────────────────────
-    CORS_ORIGINS    = ["*"]
+    # Comma-separated allowlist via CORS_ORIGINS (e.g. "https://app.example.com").
+    # Defaults to "*" for convenience, but credentials are NEVER combined with a
+    # wildcard origin (that combination is invalid/unsafe). Auth uses the
+    # Authorization header (JWT), so credentialed CORS is not required.
+    CORS_ORIGINS    = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
     CORS_METHODS    = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     CORS_HEADERS    = ["Content-Type", "Authorization", "X-Requested-With"]
-    CORS_SUPPORTS_CREDENTIALS = True
+    CORS_SUPPORTS_CREDENTIALS = False
 
     # ── Pagination ────────────────────────────────────────
     DEFAULT_PAGE_SIZE = 30

@@ -5,7 +5,7 @@ Blueprint واحد يجمع كل المسارات
 import datetime, io, json, os, smtplib, mimetypes, urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Blueprint, request, send_file, g, current_app, send_from_directory
+from flask import Blueprint, request, send_file, g, current_app, send_from_directory, jsonify
 from flask_jwt_extended import (
     create_access_token, create_refresh_token,
     jwt_required, get_jwt_identity,
@@ -3616,7 +3616,7 @@ def supplier_upload_doc():
 #  SEED DATA
 # ══════════════════════════════════════════════════════════════
 @api.route("/seed", methods=["POST"])
-@jwt_required()
+@require_role("admin")
 def seed_data():
     from app.seed_data import seed_all
     force = (request.get_json() or {}).get("force", False)
