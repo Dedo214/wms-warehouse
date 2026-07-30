@@ -14,3 +14,5 @@ backups/
 files.zip
 server_err.log
 server_out.log
+.coverage
+venv/
