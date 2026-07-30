@@ -1,6 +1,6 @@
 """Flask Application Factory"""
-import os, socket, datetime, shutil
-from flask import Flask, jsonify, send_from_directory
+import os, socket, datetime, shutil, logging
+from flask import Flask, jsonify, send_from_directory, current_app
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_socketio import SocketIO, emit, join_room
@@ -20,13 +20,17 @@ from app.utils import gen_ref
 from app.middleware import register_jwt_callbacks, register_request_hooks, register_error_handlers
 from app.routes import api
 
+logger = logging.getLogger(__name__)
+
 socketio = SocketIO()
 
 def get_local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]; s.close(); return ip
-    except: return "127.0.0.1"
+    except OSError as e:
+        logger.debug(f"Could not determine local IP, falling back to loopback: {e}")
+        return "127.0.0.1"
 
 def create_app(cfg=None):
     app = Flask(__name__)
@@ -68,8 +72,8 @@ def create_app(cfg=None):
             uid = get_jwt_identity()
             if uid:
                 join_room(f"user_{uid}")
-        except:
-            pass
+        except Exception as e:
+            app.logger.debug(f"WebSocket connect could not join user room: {e}")
 
     @app.route("/health")
     def health():
@@ -146,6 +150,8 @@ def auto_reorder_check():
         db.session.commit()
         return {"created":1, "pr_id":pr.id, "items":len(to_reorder)}
     except Exception as e:
+        db.session.rollback()
+        logger.exception("Auto-reorder check failed")
         return {"created":0,"reason":str(e)[:100]}
 
 def _init_scheduler(app):
@@ -170,11 +176,14 @@ def _init_scheduler(app):
                     all_b = sorted([f for f in os.listdir(backup_dir) if f.startswith("wms_auto_backup_")], reverse=True)
                     for old in all_b[keep:]:
                         try: os.remove(os.path.join(backup_dir,old))
-                        except: pass
+                        except OSError as e:
+                            app.logger.warning(f"Could not remove old backup {old}: {e}")
                     c = BackupConfig.query.filter_by(key="last_backup").first()
                     if c: c.value = ts
                     db.session.commit()
-                except: pass
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Auto backup job failed")
         interval = int((app.config.get("BACKUP_INTERVAL_HOURS",24))) * 3600
         sched.add_job(auto_backup_job, "interval", seconds=interval, id="auto_backup", replace_existing=True)
 
@@ -185,7 +194,9 @@ def _init_scheduler(app):
                     deleted = InventoryLayer.query.filter(InventoryLayer.quantity == 0).delete()
                     if deleted:
                         db.session.commit()
-                except: pass
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Inventory layer cleanup job failed")
 
         sched.add_job(cleanup_layers_job, "interval", days=7, id="cleanup_layers", replace_existing=True)
 
@@ -215,7 +226,9 @@ def _init_scheduler(app):
                                     count_id=cnt.id, item_id=it.id,
                                     system_quantity=stk.quantity))
                         db.session.commit()
-                except: pass
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Auto create counts job failed")
 
         sched.add_job(auto_create_counts_job, "interval", hours=12, id="auto_create_counts", replace_existing=True)
 
@@ -224,7 +237,8 @@ def _init_scheduler(app):
                 try:
                     from app import auto_reorder_check
                     auto_reorder_check()
-                except: pass
+                except Exception:
+                    app.logger.exception("Auto reorder job failed")
 
         sched.add_job(auto_reorder_job, "interval", hours=6, id="auto_reorder", replace_existing=True)
         sched.start()
@@ -237,14 +251,18 @@ def _init_scheduler(app):
 def _column_exists(table, col):
     try:
         return any(r[1]==col for r in db.session.execute(db.text(f"PRAGMA table_info({table})")))
-    except: return False
+    except Exception as e:
+        current_app.logger.warning(f"Could not inspect columns of table '{table}': {e}")
+        return False
 
 def _add_col(table, col, dtype):
     if not _column_exists(table, col):
         try:
             db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {col} {dtype}"))
             db.session.commit()
-        except: db.session.rollback()
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.warning(f"Migration: could not add column {table}.{col}: {e}")
 
 def _migrate(db):
     _add_col("projects","actual_cost","FLOAT DEFAULT 0.0")
